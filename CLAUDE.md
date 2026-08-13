@@ -1,13 +1,16 @@
-# utils
+# toolbox
 
 Personal command-line tools that live on this machine. This checkout is the
 source of truth: `install.sh` only creates symlinks into `~/.local/bin`, so
 editing a file here changes the installed tool immediately — there is no build
 or copy step to remember.
 
-**What each tool does, how to call it and what it needs is in `README.md`.**
-Keep that file current when tool behavior changes; this one covers the repo
-itself.
+**Each tool's own `--help` is its documentation.** Flags, keys, environment
+variables and behavior belong there (or in the header comment for scripts
+without a `--help`), so a user who has the tool installed never needs the repo.
+`README.md` stays a one-line-per-tool index plus install instructions — when a
+tool changes, update its `--help` first and only touch `README.md` if the
+one-liner stopped being true.
 
 ## Layout
 
@@ -19,8 +22,9 @@ itself.
 
 Adding a tool: drop a single executable file in `bin/`, or put the package in
 `lib/<name>/` and symlink `bin/<name> -> ../lib/<name>/<entrypoint>`. Then
-re-run `./install.sh` and give the tool a section in `README.md`. Nothing else
-knows about the tool list — the script globs `bin/`.
+re-run `./install.sh`, make sure the tool explains itself under `--help`, and add
+a one-line row to the `README.md` table. Nothing else knows about the tool list —
+the script globs `bin/`.
 
 ## install.sh
 
