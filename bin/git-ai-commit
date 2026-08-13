@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+#
+# git-ai-commit — stage everything, generate a commit message with
+# `claude -p` (Haiku by default) from the staged diff, commit, and push.
+#
+# Usage:
+#   git-ai-commit [options] ["initial intent / hint"]
+#
+# Options:
+#   -y, --yes            Skip the confirmation prompt (auto-commit)
+#   -n, --dry-run        Generate + print the message only; no commit/push
+#       --no-push        Commit but do not push
+#       --no-pull        On a rejected push, do not offer to pull + retry
+#       --amend          Amend the previous commit instead of creating one
+#   -m, --model <name>   Model to use (default: haiku, or $AI_COMMIT_MODEL)
+#   -h, --help           Show this help and exit
+#
+# The positional argument is a seed describing WHY the change was made;
+# the model still reads the full diff to write the final message.
+#
+# If the push is rejected because the branch is behind, the script offers to
+# `git pull --rebase` and retry. Missing upstream is fixed with `push -u`.
+
+set -euo pipefail
+
+# `set -e` kills the script without a word; say what died and where.
+trap 'status=$?; echo "git-ai-commit: line $LINENO: \"$BASH_COMMAND\" exited $status" >&2' ERR
+
+# --- defaults ------------------------------------------------------------
+SEED=""
+MODEL="${AI_COMMIT_MODEL:-haiku}"
+ASSUME_YES=0
+DRY_RUN=0
+DO_PUSH=1
+DO_PULL=1
+AMEND=0
+
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
+
+# --- parse args ----------------------------------------------------------
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -y|--yes)      ASSUME_YES=1; shift ;;
+    -n|--dry-run)  DRY_RUN=1; shift ;;
+    --no-push)     DO_PUSH=0; shift ;;
+    --no-pull)     DO_PULL=0; shift ;;
+    --amend)       AMEND=1; shift ;;
+    -m|--model)    MODEL="${2:?--model needs a value}"; shift 2 ;;
+    --model=*)     MODEL="${1#*=}"; shift ;;
+    -h|--help)     usage; exit 0 ;;
+    --)            shift; SEED="${1:-$SEED}"; break ;;
+    -*)            echo "error: unknown option '$1'" >&2; usage >&2; exit 2 ;;
+    *)             SEED="$1"; shift ;;
+  esac
+done
+
+# --- sanity --------------------------------------------------------------
+command -v claude >/dev/null 2>&1 || { echo "error: 'claude' CLI not found in PATH" >&2; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: not a git repository" >&2; exit 1; }
+
+# --- stage ---------------------------------------------------------------
+git add -A
+
+# Choose what the model reads. --amend includes the prior commit's changes.
+if [ "$AMEND" -eq 1 ]; then
+  DIFF_REF="HEAD~1"
+else
+  DIFF_REF="--cached"
+fi
+
+# Nothing to commit (and not amending)? bail cleanly.
+if [ "$AMEND" -eq 0 ] && git diff --cached --quiet; then
+  echo "nothing staged — working tree clean. aborting." >&2
+  exit 0
+fi
+
+# --- collect diff (truncated to keep prompt sane) ------------------------
+# Truncation happens in the shell, not through `head`: `git diff | head -c` makes
+# git die of SIGPIPE on any diff past the limit, and with pipefail + set -e that
+# killed the whole script silently with exit 141.
+DIFF_LIMIT=60000
+if [ "$AMEND" -eq 1 ]; then
+  STAT="$(git diff "$DIFF_REF" --stat)"
+  DIFF="$(git diff "$DIFF_REF" --no-color)"
+else
+  STAT="$(git diff --cached --stat)"
+  DIFF="$(git diff --cached --no-color)"
+fi
+
+if [ "${#DIFF}" -gt "$DIFF_LIMIT" ]; then
+  echo "→ diff is ${#DIFF} bytes, sending the first ${DIFF_LIMIT}" >&2
+  DIFF="${DIFF:0:$DIFF_LIMIT}
+[... diff truncated at ${DIFF_LIMIT} bytes ...]"
+fi
+
+# --- build prompt --------------------------------------------------------
+PROMPT="$(cat <<EOF
+You are writing a git commit message. Output ONLY the raw commit message —
+no markdown fences, no commentary, no leading/trailing blank lines.
+
+Format (Conventional Commits):
+  <type>(<optional scope>): <subject, imperative mood, <=50 chars, no period>
+
+  <body (OPTIONAL, only when really needed): wrap at 72 cols; explain WHAT and WHY, not how; bullet list with
+   '-' if multiple distinct changes; omit body entirely for trivial changes>
+
+Allowed types: feat, fix, refactor, perf, docs, style, test, build, ci, chore.
+
+Author's intent / hint (may be empty — infer from the diff if so):
+${SEED:-<none provided>}
+
+--- File stat ---
+${STAT}
+
+--- Diff (may be truncated) ---
+${DIFF}
+EOF
+)"
+
+# --- generate ------------------------------------------------------------
+echo "→ generating commit message with model '${MODEL}'..." >&2
+MSG="$(claude -p "$PROMPT" --model "$MODEL")"
+
+# Strip accidental code fences / surrounding whitespace.
+MSG="$(printf '%s\n' "$MSG" | sed -E '/^```/d')"
+MSG="$(printf '%s' "$MSG" | sed -e 's/[[:space:]]*$//' | awk 'NF{p=1} p')"
+
+if [ -z "${MSG// /}" ]; then
+  echo "error: model returned an empty message. aborting." >&2
+  exit 1
+fi
+
+# --- preview -------------------------------------------------------------
+echo "────────────────────────────────────────" >&2
+printf '%s\n' "$MSG" >&2
+echo "────────────────────────────────────────" >&2
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "(dry-run) not committing." >&2
+  exit 0
+fi
+
+# --- confirm -------------------------------------------------------------
+if [ "$ASSUME_YES" -eq 0 ]; then
+  if [ ! -t 0 ]; then
+    echo "error: no TTY for confirmation; pass -y to auto-commit." >&2
+    exit 1
+  fi
+  printf 'commit%s? [y/N] ' "$([ "$DO_PUSH" -eq 1 ] && echo ' + push')" >&2
+  read -r reply </dev/tty
+  case "$reply" in
+    y|Y|yes|YES) ;;
+    *) echo "aborted." >&2; exit 1 ;;
+  esac
+fi
+
+# --- commit --------------------------------------------------------------
+if [ "$AMEND" -eq 1 ]; then
+  git commit --amend -m "$MSG"
+else
+  git commit -m "$MSG"
+fi
+
+# --- push ----------------------------------------------------------------
+if [ "$DO_PUSH" -eq 0 ]; then
+  echo "✓ committed (push skipped)." >&2
+  exit 0
+fi
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
+# Run the push, capturing output so we can classify a failure.
+do_push() {
+  if [ "$AMEND" -eq 1 ]; then
+    git push --force-with-lease "$@" 2>&1
+  else
+    git push "$@" 2>&1
+  fi
+}
+
+# Ask y/N; returns 1 when there is no TTY or the answer is not yes.
+confirm() {
+  [ "$ASSUME_YES" -eq 1 ] && return 0
+  [ -t 0 ] || return 1
+  printf '%s [y/N] ' "$1" >&2
+  read -r reply </dev/tty
+  case "$reply" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+if PUSH_OUT="$(do_push)"; then
+  printf '%s\n' "$PUSH_OUT" >&2
+  echo "✓ committed and pushed." >&2
+  exit 0
+fi
+
+printf '%s\n' "$PUSH_OUT" >&2
+
+# --- push failed: classify and offer a fix -------------------------------
+case "$PUSH_OUT" in
+  *"has no upstream branch"*|*"no upstream configured"*|*"set-upstream"*)
+    echo "push failed: branch '${BRANCH}' has no upstream." >&2
+    if confirm "run 'git push -u origin ${BRANCH}'?"; then
+      if PUSH_OUT="$(do_push -u origin "$BRANCH")"; then
+        printf '%s\n' "$PUSH_OUT" >&2
+        echo "✓ committed and pushed (upstream set)." >&2
+        exit 0
+      fi
+      printf '%s\n' "$PUSH_OUT" >&2
+    fi
+    echo "commit is local only. run: git push -u origin ${BRANCH}" >&2
+    exit 1
+    ;;
+  *"non-fast-forward"*|*"fetch first"*|*"Updates were rejected"*|*"behind its remote"*|*"stale info"*)
+    echo "push rejected: '${BRANCH}' is behind its remote." >&2
+    if [ "$DO_PULL" -eq 1 ] && confirm "run 'git pull --rebase' and retry the push?"; then
+      if ! git pull --rebase; then
+        echo "pull --rebase failed — resolve the conflict, then: git rebase --continue && git push" >&2
+        exit 1
+      fi
+      if PUSH_OUT="$(do_push)"; then
+        printf '%s\n' "$PUSH_OUT" >&2
+        echo "✓ committed, rebased and pushed." >&2
+        exit 0
+      fi
+      printf '%s\n' "$PUSH_OUT" >&2
+      echo "push still failing after rebase. commit is local only." >&2
+      exit 1
+    fi
+    echo "commit is local only. run: git pull --rebase && git push" >&2
+    exit 1
+    ;;
+  *)
+    echo "push failed (see output above). commit is local only." >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Gramax tauri dev, Windows build, app runs in Parallels VM.
+# Run from anywhere inside the gramax repo (worktrees included).
+#
+# The exe inside the VM loads devUrl (http://localhost:5173). "localhost" is
+# kept on purpose: it's in the app's ALLOWED_DOMAINS (a raw IP is not — the
+# app would bounce to the fallback URL), and not overriding devUrl means no
+# extra rust rebuild when the Mac's IP changes. Instead, a netsh portproxy in
+# the VM forwards VM-localhost:5173 to the Mac's vite; it is refreshed here
+# on every launch.
+set -euo pipefail
+
+VM="${PARALLELS_VM:-Windows 11}"
+ROOT="$(git rev-parse --show-toplevel)"
+
+# IP the VM can reach the Mac on. The Parallels shared-network IP (bridge100,
+# 10.211.55.2) is unreliable: a LAN/VPN route can shadow the 10.211.55/24
+# subnet. The physical interface's LAN IP works (VM egress is NATed through
+# the Mac). Default-route interface is no good either — under VPN it's a utun
+# without a usable address.
+HOST_IP=""
+for IFACE in en0 en1 en2; do
+	HOST_IP="$(ipconfig getifaddr "$IFACE" 2>/dev/null || true)"
+	[ -n "$HOST_IP" ] && break
+done
+if [ -z "$HOST_IP" ]; then
+	HOST_IP="$(ifconfig bridge100 2>/dev/null | awk '/inet /{print $2; exit}')"
+fi
+if [ -z "$HOST_IP" ]; then
+	echo "tauri-win: could not determine a host IP reachable from the VM" >&2
+	exit 1
+fi
+
+# Refresh VM-localhost:5173 -> Mac:5173 forward. netsh needs elevation, so
+# run without --current-user (SYSTEM).
+prlctl exec "$VM" netsh interface portproxy set v4tov4 \
+	listenaddress=127.0.0.1 listenport=5173 connectaddress="$HOST_IP" connectport=5173 >/dev/null
+prlctl exec "$VM" netsh interface portproxy set v6tov4 \
+	listenaddress=::1 listenport=5173 connectaddress="$HOST_IP" connectport=5173 >/dev/null
+
+# Cross-compile env for C deps (ring, etc.) — plain cargo has none of the
+# setup `cargo xwin build` provides, so mirror it: clang-cl + xwin headers,
+# llvm-lib/llvm-rc from brew llvm, rust-lld as linker (no lld-link on host).
+XWIN="$HOME/.xwin/splat"
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+CL_FLAGS="--target=x86_64-pc-windows-msvc -Wno-unused-command-line-argument -fuse-ld=lld-link"
+CL_FLAGS+=" /imsvc$XWIN/crt/include /imsvc$XWIN/sdk/include/ucrt /imsvc$XWIN/sdk/include/um /imsvc$XWIN/sdk/include/shared"
+export CC_x86_64_pc_windows_msvc="clang-cl"
+export CXX_x86_64_pc_windows_msvc="clang-cl"
+export AR_x86_64_pc_windows_msvc="llvm-lib"
+export RC_x86_64_pc_windows_msvc="llvm-rc"
+export CFLAGS_x86_64_pc_windows_msvc="$CL_FLAGS"
+export CXXFLAGS_x86_64_pc_windows_msvc="$CL_FLAGS"
+export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER="rust-lld"
+
+exec cargo +nightly -Z unstable-options -C "$ROOT/apps/tauri" tauri dev \
+	--target x86_64-pc-windows-msvc \
+	"$@"

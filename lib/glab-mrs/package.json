@@ -1,0 +1,13 @@
+{
+	"name": "glab-mrs",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Interactive merge request browser on top of `glab mr list`",
+	"bin": {
+		"glab-mrs": "./main.ts"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
+}
