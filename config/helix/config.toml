@@ -1,0 +1,40 @@
+theme = "/Users/pavel.smirnov/.config/helix/themes/edge_neon"
+
+[editor]
+true-color = true
+middle-click-paste = false
+auto-info = true
+auto-save = true
+auto-pairs = false
+color-modes = true
+
+[editor.statusline]
+right = ["diagnostics", "primary-selection-length", "position", "file-encoding", "file-type", "mode"]
+mode.normal = "NORMAL"
+mode.select = "SELECT"
+mode.insert = "INSERT"
+
+[editor.lsp]
+display-messages = true
+
+[editor.indent-guides]
+render = true
+character = '┆'
+
+[editor.cursor-shape]
+insert = "bar"
+normal = "block"
+select = "underline"
+
+[editor.file-picker]
+ignore = true
+git-ignore = true
+git-global = true
+
+[keys.normal]
+A-d = "delete_selection"
+d = "delete_selection_noyank"
+A-c = "change_selection"
+c = "change_selection_noyank"
+D = "delete_char_backward"
+X = "extend_line_above"

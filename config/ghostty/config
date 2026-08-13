@@ -1,0 +1,16 @@
+background-opacity = 0.92
+background-blur-radius = 20
+macos-titlebar-style = tabs
+macos-icon = xray
+term = xterm
+theme = wombat
+wait-after-command = true
+shell-integration = zsh
+shell-integration-features = no-cursor,sudo,title
+cursor-style = underline
+cursor-color = #ffffff
+adjust-cursor-height = -20%
+adjust-cursor-thickness = 50%
+adjust-overline-thickness = 50%
+font-family = menlo
+desktop-notifications = true
