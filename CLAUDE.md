@@ -1,9 +1,9 @@
 # toolbox
 
-Personal command-line tools that live on this machine. This checkout is the
-source of truth: `install.sh` only creates symlinks into `~/.local/bin`, so
-editing a file here changes the installed tool immediately — there is no build
-or copy step to remember.
+Personal command-line tools and application configs that live on this machine.
+This checkout is the source of truth: `install.sh` only creates symlinks into
+`~/.local/bin` and `~/.config`, so editing a file here changes the installed
+tool or config immediately — there is no build or copy step to remember.
 
 **Each tool's own `--help` is its documentation.** Flags, keys, environment
 variables and behavior belong there (or in the header comment for scripts
@@ -18,7 +18,8 @@ one-liner stopped being true.
 |------|-----------------|
 | `bin/` | Everything that ends up on `PATH`. One self-contained script per tool, or a symlink into `lib/` for tools that span several files. |
 | `lib/<tool>/` | Multi-file tools with their own dependencies (`package.json`, lockfile, config). |
-| `install.sh` | Links `bin/*` into `$PREFIX/bin` (default `~/.local`), installs `lib/` dependencies, reports missing external commands. |
+| `config/<app>` | Application configs, one entry per `~/.config` name — a whole directory (`config/helix`) or a single file (`config/starship.toml`). |
+| `install.sh` | Links `bin/*` into `$PREFIX/bin` (default `~/.local`) and `config/*` into `$XDG_CONFIG_HOME` (default `~/.config`), installs `lib/` dependencies, reports missing external commands. |
 
 Adding a tool: drop a single executable file in `bin/`, or put the package in
 `lib/<name>/` and symlink `bin/<name> -> ../lib/<name>/<entrypoint>`. Then
@@ -26,16 +27,25 @@ re-run `./install.sh`, make sure the tool explains itself under `--help`, and ad
 a one-line row to the `README.md` table. Nothing else knows about the tool list —
 the script globs `bin/`.
 
+Adding a config: move the real thing out of `~/.config` and into `config/` under
+the same name, then `./install.sh --force`. Directories are linked whole, so
+whatever the application writes inside them lands in this checkout — which is the
+point, and also why a directory that holds machine-local state does not belong
+here.
+
 ## install.sh
 
-`--force` is needed to replace a regular file that already sits on a target name
-(it may be someone's own copy); `--dry-run` prints the plan.
+`bin/` and `config/` go through the same `link_tree`, so both behave the same
+way. `--force` is needed when something real (not a link) already sits on a
+target name — it may be the user's own copy, so it is moved to `<name>.bak`
+rather than deleted, and a `<name>.bak` already in the way stops the entry.
+`--dry-run` prints the plan; `--no-config` skips `~/.config` entirely.
 
-Removal works off the install directory, not off `bin/`: `--uninstall` globs
-`$PREFIX/bin`, keeps every link whose target lies inside this checkout and drops
-those — so a tool deleted from `bin/` still gets cleaned up. A plain install does
-the same sweep for links that no longer resolve, which is what removing a tool
-from `bin/` leaves behind.
+Removal works off the destination directories, not off `bin/` and `config/`:
+`--uninstall` globs `$PREFIX/bin` and the config directory, keeps every link
+whose target lies inside this checkout and drops those — so an entry deleted from
+the checkout still gets cleaned up. A plain install does the same sweep for links
+that no longer resolve, which is what removing an entry leaves behind.
 
 ## Working on the tools
 
