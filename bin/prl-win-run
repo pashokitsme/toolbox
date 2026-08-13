@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Cargo runner: run a Windows exe inside a Parallels VM via prlctl.
+# Wired up in ~/.cargo/config.toml as runner for x86_64-pc-windows-msvc.
+# Usage: prl-win-run <abs-path-to-exe> [args...]
+set -euo pipefail
+
+VM="${PARALLELS_VM:-Windows 11}"
+EXE="$1"
+shift
+
+case "$EXE" in
+	"$HOME"/*)
+		REL="${EXE#"$HOME"/}"
+		WIN="\\\\Mac\\Home\\${REL//\//\\}"
+		;;
+	/*)
+		WIN="\\\\Mac\\AllFiles${EXE//\//\\}"
+		;;
+	*)
+		echo "prl-win-run: need absolute path, got: $EXE" >&2
+		exit 1
+		;;
+esac
+
+# tauri dev kills the runner on rebuild; make sure the guest process dies too
+cleanup() {
+	prlctl exec "$VM" --current-user taskkill /f /im "$(basename "$EXE")" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+prlctl exec "$VM" --current-user "$WIN" "$@"
