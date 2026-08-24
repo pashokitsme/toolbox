@@ -18,7 +18,8 @@ copy — edit a file here and the installed tool or config changes with it.
 
 | | |
 |---|---|
-| `glab-mrs` | Full-screen browser for GitLab merge requests and their pipelines: filter and read merge requests, watch job statuses, tail job logs, retry or cancel jobs and pipelines. |
+| `glab-mrs` | Full-screen browser for GitLab merge requests and their pipelines: filter and read merge requests, watch job statuses, tail job logs, retry or cancel jobs and pipelines. Give it a link or a number to open that one merge request, `-y` to copy its link and be done. |
+| `glmr` | `glab-mrs` under a shorter name — the same tool, for `glmr 3614`. |
 | `git-ai-commit` | Stages everything, writes the commit message with Claude from the staged diff, commits and pushes. |
 | `tauri-win` | Runs `tauri dev` for the Gramax desktop app cross-compiled to Windows, with the app itself running in a Parallels VM. |
 | `prl-win-run` | The cargo runner behind `tauri-win`: executes a Windows binary inside the Parallels VM. Not called by hand. |

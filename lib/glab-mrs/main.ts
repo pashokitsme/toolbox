@@ -1,22 +1,30 @@
 #!/usr/bin/env bun
 // glab-mrs — an interactive merge request and pipeline browser on top of glab.
+// Also installed as `glmr`.
 //
-// Arguments are passed straight through to `glab mr list`:
+// Without a merge request the arguments go straight through to `glab mr list`:
 //   glab-mrs --author @me
 //   glab-mrs --all --search openapi -P 100
 //   glab-mrs -R ics/doc-reader --reviewer @me
+//
+// With one it opens that merge request, from any directory:
+//   glmr https://gitlab.example.com/group/project/-/merge_requests/3614
+//   glmr 3614            (or !3614 — the repository of the current directory)
+//   glmr -y 3614         copy the link and exit, no screen at all
 
 import {
 	cancelJob,
 	cancelPipeline,
 	copyRichLink,
 	copyText,
+	fetchMR,
 	type Job,
 	jobTrace,
 	listMRs,
 	type MR,
 	mrPipelines,
 	openInBrowser,
+	parseMRRef,
 	type Pipeline,
 	pipelineForSha,
 	pipelineJobs,
@@ -50,19 +58,47 @@ import {
 	type Key,
 	type Row,
 	showCursor,
+	stripAnsi,
 	truncateToWidth,
 	wrapAnsi,
 } from "./term.ts";
 
-const HELP = `glab-mrs — interactive merge request and pipeline browser
+// The command line is only worth reading before the screen is up, so --help
+// prints USAGE and KEYS while the "?" screen shows KEYS alone — every line it
+// does not spend is a line of keys that survives a short terminal, which
+// truncates the help rather than scrolling it.
+const USAGE = `glab-mrs — interactive merge request and pipeline browser
+also installed as glmr
 
-usage: glab-mrs [glab mr list flags...]
+usage: glab-mrs [-y|-Y] [merge request] [glab mr list flags...]
 
   glab-mrs --author @me
   glab-mrs --all --search openapi -P 100
   glab-mrs -R ics/doc-reader --reviewer @me
 
-Letters are commands, so filtering lives behind "/" (the same physical key types
+The one argument that is not a flag is a merge request, and it opens instead of
+a list. It is either a link, which carries its own host and works from any
+directory, or a number, which means that merge request in -R, or in the
+repository of the current directory.
+
+  glmr https://gitlab.example.com/group/project/-/merge_requests/3614
+  glmr 3614
+  glmr '!3614'
+  glmr -R ics/doc-reader 3614
+  glmr -R https://gitlab.example.com/group/project 3614  (outside a repository)
+
+A merge request of its own leaves nothing for the list flags to do, so they are
+ignored — except -R, which says where a number lives.
+
+  -y, --copy            copy the link and exit, without opening anything
+  -Y, --copy-markdown   the same as [title](url)
+
+The link is the rich kind: it pastes into a chat or a document as the title of
+the merge request, and into a plain-text field as "title — url". These are the
+y and Y of the screen, so -y and -Y are the same keys from the shell.
+`;
+
+const KEYS = `Letters are commands, so filtering lives behind "/" (the same physical key types
 "." on ЙЦУКЕН, which works too). Arrows work everywhere, h/j/k/l do the same
 thing, and nothing needs ctrl or cmd.
 
@@ -79,7 +115,8 @@ merge requests
 
 merge request
   j k  up down      scroll               space page down   g G  top bottom
-  h  left  esc  q   back                 o open in browser
+  h  left  esc  q   back, and quit when the request came from the command line
+  o open in browser
   p                 pipeline and jobs    y copy link       Y copy as markdown
 
 pipeline jobs
@@ -104,6 +141,8 @@ env
   GLAB_MRS_IMAGES=off       do not draw images
   GLAB_MRS_IMAGE_PROTOCOL   kitty | iterm | none (autodetected)
 `;
+
+const HELP = `${USAGE}\n${KEYS}`;
 
 // ------------------------------------------------------------------ filtering
 
@@ -132,7 +171,14 @@ function fuzzyScore(haystack: string, query: string): number | null {
 }
 
 const haystackOf = (mr: MR): string =>
-	[`!${mr.iid}`, mr.title, mr.author, mr.sourceBranch, mr.targetBranch, mr.labels.join(" ")].join(" ");
+	[
+		`!${mr.iid}`,
+		mr.title,
+		mr.author,
+		mr.sourceBranch,
+		mr.targetBranch,
+		mr.labels.join(" "),
+	].join(" ");
 
 // -------------------------------------------------------------------- render
 
@@ -176,14 +222,26 @@ const jobColor = (status: string): string => {
 };
 
 const jobGlyph = (status: string): string => {
-	const glyph = status === "manual" ? "◌" : status === "skipped" ? "○" : status === "canceled" ? "◍" : "●";
+	const glyph =
+		status === "manual"
+			? "◌"
+			: status === "skipped"
+				? "○"
+				: status === "canceled"
+					? "◍"
+					: "●";
 	return `${jobColor(status)}${glyph}${C.reset}`;
 };
 
 const stateColor = (mr: MR): string =>
-	mr.state === "merged" ? C.brightBlue : mr.state === "closed" ? C.red : C.yellow;
+	mr.state === "merged"
+		? C.brightBlue
+		: mr.state === "closed"
+			? C.red
+			: C.yellow;
 
-const shortDate = (iso: string): string => (iso.length >= 10 ? iso.slice(5, 10) : "     ");
+const shortDate = (iso: string): string =>
+	iso.length >= 10 ? iso.slice(5, 10) : "     ";
 
 function duration(seconds: number | null): string {
 	if (seconds === null) return "";
@@ -191,20 +249,44 @@ function duration(seconds: number | null): string {
 	return `${Math.floor(seconds / 60)}m ${String(Math.round(seconds % 60)).padStart(2, "0")}s`;
 }
 
-function listLine(mr: MR, pipeline: PipelineState | undefined, selected: boolean, width: number): string {
-	const marker = selected ? `${C.cyan}❯${C.reset} ` : "  ";
+/** One merge request as a row. The marker is what changes between the places
+ *  it is used: the cursor on the list, a green check on the way out of --copy,
+ *  which is the whole reason this is not just listLine. */
+function mrRow(
+	mr: MR,
+	pipeline: PipelineState | undefined,
+	marker: string,
+	bold: boolean,
+	width: number,
+): string {
 	const draft = mr.draft ? `${C.brightRed}[draft]${C.reset} ` : "";
-	const title = selected ? `${C.bold}${mr.title}${C.reset}` : mr.title;
+	const title = bold ? `${C.bold}${mr.title}${C.reset}` : mr.title;
 	const head = `${marker}${stateColor(mr)}${fitTo(`!${mr.iid}`, 6)}${C.reset} ${pipelineGlyph(pipeline)} ${C.gray}${shortDate(mr.updatedAt)}${C.reset} ${C.cyan}${fitTo(mr.author, 13)}${C.reset} `;
 	return truncateToWidth(`${head}${draft}${title}`, width);
 }
+
+const listLine = (
+	mr: MR,
+	pipeline: PipelineState | undefined,
+	selected: boolean,
+	width: number,
+): string =>
+	mrRow(
+		mr,
+		pipeline,
+		selected ? `${C.cyan}❯${C.reset} ` : "  ",
+		selected,
+		width,
+	);
 
 /** Commands are matched on the US-layout position of the key, so they keep
  *  working when the keyboard is switched to another layout. */
 const command = (key: Key): string | undefined => key.base ?? key.char;
 
-const hint = (keys: string, what: string): string => `${C.bold}${keys}${C.reset}${C.gray} ${what}`;
-const hints = (...pairs: [string, string][]): string => pairs.map(([k, w]) => hint(k, w)).join(`${C.gray} · `);
+const hint = (keys: string, what: string): string =>
+	`${C.bold}${keys}${C.reset}${C.gray} ${what}`;
+const hints = (...pairs: [string, string][]): string =>
+	pairs.map(([k, w]) => hint(k, w)).join(`${C.gray} · `);
 
 const LIST_HINTS = hints(
 	["jk", "move"],
@@ -218,7 +300,22 @@ const LIST_HINTS = hints(
 	["q", "quit"],
 );
 
-const DETAIL_HINTS = hints(["jk", "scroll"], ["p", "pipeline"], ["o", "browser"], ["y", "link"], ["h", "back"]);
+const DETAIL_HINTS = hints(
+	["jk", "scroll"],
+	["p", "pipeline"],
+	["o", "browser"],
+	["y", "link"],
+	["h", "back"],
+);
+
+// a merge request named on the command line has no list behind it
+const DETAIL_HINTS_ALONE = hints(
+	["jk", "scroll"],
+	["p", "pipeline"],
+	["o", "browser"],
+	["y", "link"],
+	["q", "quit"],
+);
 
 const JOBS_HINTS = hints(
 	["jk", "move"],
@@ -232,14 +329,26 @@ const JOBS_HINTS = hints(
 	["h", "back"],
 );
 
-const LOG_HINTS = hints(["jk", "scroll"], ["gG", "ends"], ["u", "refresh"], ["o", "browser"], ["h", "back"]);
+const LOG_HINTS = hints(
+	["jk", "scroll"],
+	["gG", "ends"],
+	["u", "refresh"],
+	["o", "browser"],
+	["h", "back"],
+);
 
 // ---------------------------------------------------------------------- app
 
 type ImageState =
 	| { status: "loading" }
 	| { status: "failed" }
-	| { status: "ready"; data: ImageData; cols: number; rows: number; blob: string | null };
+	| {
+			status: "ready";
+			data: ImageData;
+			cols: number;
+			rows: number;
+			blob: string | null;
+	  };
 
 type Mode = "list" | "detail" | "jobs" | "log" | "help";
 
@@ -272,14 +381,31 @@ class App {
 		loading: boolean;
 		origin: Mode;
 	} | null = null;
-	private log: { job: Job; lines: string[]; scroll: number; loading: boolean } | null = null;
+	private log: {
+		job: Job;
+		lines: string[];
+		scroll: number;
+		loading: boolean;
+	} | null = null;
 	private refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 	private busy = false;
+	private page = 1;
+	private moreToLoad = true;
+	private loadingMore = false;
 	private drawnImages = false;
 	private done!: () => void;
 
-	constructor(private readonly args: string[]) {}
+	/** `single` is the merge request named on the command line: there is no list
+	 *  behind it, so it is what opens and what leaving goes back to — nothing. */
+	constructor(
+		private readonly args: string[],
+		private readonly single: MR | null = null,
+	) {
+		// a merge request list is one page deep; the rest arrives as the reader
+		// walks down to it — unless the command line pinned a page of its own
+		this.moreToLoad = !args.some((a) => /^(-p|--page)(=|\d|$)/.test(a));
+	}
 
 	private get height(): number {
 		return Math.max(6, this.screen.rows - 2); // one line of chrome above and below
@@ -292,13 +418,26 @@ class App {
 	async run(): Promise<void> {
 		// kitty draws images on a separate layer — drop them before each repaint
 		this.screen.setPrelude(() =>
-			this.drawnImages ? ((this.drawnImages = false), clearImages(this.protocol)) : "",
+			this.drawnImages
+				? ((this.drawnImages = false), clearImages(this.protocol))
+				: "",
 		);
 
-		await this.reload();
-		if (this.all.length === 0) {
-			console.error("no merge requests match these filters");
-			process.exit(1);
+		if (this.single) {
+			this.all = [this.single];
+			this.view = [this.single];
+		} else {
+			await this.reload();
+			if (this.all.length === 0) {
+				// reload keeps what went wrong in the status line, which nothing
+				// is going to draw now — say it here or it is lost
+				console.error(
+					this.status
+						? stripAnsi(this.status)
+						: "no merge requests match these filters",
+				);
+				process.exit(1);
+			}
 		}
 
 		hideCursor();
@@ -311,6 +450,16 @@ class App {
 		});
 		process.stdout.on("resize", () => this.render());
 		process.on("exit", () => this.restore());
+
+		// the terminal is measurable only now, and openDetail lays out to its width
+		if (this.single) {
+			this.openDetail();
+			// the header names the pipeline, so redraw the request once it is known
+			void this.loadPipelines().then(() => {
+				if (this.mode === "detail") this.openDetail();
+				this.render();
+			});
+		}
 
 		this.render();
 		await new Promise<void>((resolve) => {
@@ -355,6 +504,18 @@ class App {
 		const projectId = this.all[0]?.projectId;
 		if (!projectId) return;
 
+		// one merge request is not worth a page of the project's pipelines
+		if (this.single) {
+			const mr = this.single;
+			if (!mr.sha) return;
+			this.pipelines.set(
+				mr.sha,
+				pipelineState(await pipelineForSha(mr.projectId, mr.sha)),
+			);
+			this.render();
+			return;
+		}
+
 		const recent = await recentPipelines(projectId);
 		for (const mr of this.all) {
 			const status = recent.get(mr.sha);
@@ -362,14 +523,21 @@ class App {
 		}
 		this.render();
 
-		const queue = this.all.filter((mr) => mr.sha && !this.pipelines.has(mr.sha));
+		const queue = this.all.filter(
+			(mr) => mr.sha && !this.pipelines.has(mr.sha),
+		);
 		const worker = async () => {
 			for (let mr = queue.shift(); mr; mr = queue.shift()) {
-				this.pipelines.set(mr.sha, pipelineState(await pipelineForSha(mr.projectId, mr.sha)));
+				this.pipelines.set(
+					mr.sha,
+					pipelineState(await pipelineForSha(mr.projectId, mr.sha)),
+				);
 				this.render();
 			}
 		};
-		await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker));
+		await Promise.all(
+			Array.from({ length: Math.min(6, queue.length) }, worker),
+		);
 	}
 
 	private applyFilter(): void {
@@ -390,8 +558,12 @@ class App {
 		const height = this.height - 1; // the filter line sits above the list
 		this.cursor = Math.max(0, Math.min(this.cursor, this.view.length - 1));
 		if (this.cursor < this.offset) this.offset = this.cursor;
-		if (this.cursor >= this.offset + height) this.offset = this.cursor - height + 1;
-		this.offset = Math.max(0, Math.min(this.offset, Math.max(0, this.view.length - height)));
+		if (this.cursor >= this.offset + height)
+			this.offset = this.cursor - height + 1;
+		this.offset = Math.max(
+			0,
+			Math.min(this.offset, Math.max(0, this.view.length - height)),
+		);
 	}
 
 	private get currentMR(): MR | undefined {
@@ -571,6 +743,17 @@ class App {
 		this.clampScroll();
 	}
 
+	/** Back out of a merge request — to the list, or out of the program when the
+	 *  command line named the request and there is no list to go back to. */
+	private leaveDetail(): void {
+		if (this.single) {
+			this.quit();
+			return;
+		}
+		this.mode = "list";
+		this.detail = null;
+	}
+
 	private detailKey(key: Key): void {
 		const detail = this.detail;
 		if (!detail) return;
@@ -578,15 +761,17 @@ class App {
 
 		const step = this.moveBy(key, page);
 		if (step !== null) {
-			detail.scroll = Math.max(0, Math.min(detail.scroll + step, detail.rows.length - 1));
+			detail.scroll = Math.max(
+				0,
+				Math.min(detail.scroll + step, detail.rows.length - 1),
+			);
 			return;
 		}
 
 		switch (key.name) {
 			case "left":
 			case "escape":
-				this.mode = "list";
-				this.detail = null;
+				this.leaveDetail();
 				return;
 			case "home":
 				detail.scroll = 0;
@@ -601,8 +786,7 @@ class App {
 				switch (command(key)) {
 					case "h":
 					case "q":
-						this.mode = "list";
-						this.detail = null;
+						this.leaveDetail();
 						return;
 					case "g":
 						detail.scroll = 0;
@@ -641,7 +825,10 @@ class App {
 
 		const step = this.moveBy(key, this.height - 2);
 		if (step !== null) {
-			jobs.cursor = Math.max(0, Math.min(jobs.cursor + step, jobs.items.length - 1));
+			jobs.cursor = Math.max(
+				0,
+				Math.min(jobs.cursor + step, jobs.items.length - 1),
+			);
 			return;
 		}
 
@@ -680,7 +867,10 @@ class App {
 						this.openBrowser(jobs.pipeline?.webUrl);
 						break;
 					case "r":
-						if (job) this.ask(`retry job ${job.name}?`, () => retryJob(jobs.mr.projectId, job.id));
+						if (job)
+							this.ask(`retry job ${job.name}?`, () =>
+								retryJob(jobs.mr.projectId, job.id),
+							);
 						break;
 					case "R":
 						if (jobs.pipeline)
@@ -689,7 +879,10 @@ class App {
 							);
 						break;
 					case "x":
-						if (job) this.ask(`cancel job ${job.name}?`, () => cancelJob(jobs.mr.projectId, job.id));
+						if (job)
+							this.ask(`cancel job ${job.name}?`, () =>
+								cancelJob(jobs.mr.projectId, job.id),
+							);
 						break;
 					case "X":
 						if (jobs.pipeline)
@@ -698,7 +891,10 @@ class App {
 							);
 						break;
 					case "s":
-						if (job) this.ask(`start manual job ${job.name}?`, () => playJob(jobs.mr.projectId, job.id));
+						if (job)
+							this.ask(`start manual job ${job.name}?`, () =>
+								playJob(jobs.mr.projectId, job.id),
+							);
 						break;
 					case "?":
 						this.previousMode = "jobs";
@@ -720,7 +916,10 @@ class App {
 
 		const step = this.moveBy(key, page);
 		if (step !== null) {
-			log.scroll = Math.max(0, Math.min(log.scroll + step, Math.max(0, log.lines.length - 1)));
+			log.scroll = Math.max(
+				0,
+				Math.min(log.scroll + step, Math.max(0, log.lines.length - 1)),
+			);
 			return;
 		}
 
@@ -780,8 +979,9 @@ class App {
 		const mr = this.currentMR;
 		if (!mr) return;
 		if (kind === "rich") {
-			copyRichLink(mr.title, mr.url);
-			this.status = `${C.green}copied link to !${mr.iid}`;
+			this.status = copyRichLink(mr.title, mr.url)
+				? `${C.green}copied link to !${mr.iid}`
+				: `${C.red}could not reach the clipboard`;
 		} else {
 			copyText(`[${mr.title}](${mr.url})`);
 			this.status = `${C.green}copied markdown for !${mr.iid}`;
@@ -805,6 +1005,12 @@ class App {
 	private openDetail(): void {
 		const mr = this.view[this.cursor];
 		if (!mr) return;
+		// reopening the same request is a redraw — do not throw the reader's place
+		// away; iids repeat across projects, so the project has to match too
+		const same =
+			this.detail?.mr.iid === mr.iid &&
+			this.detail?.mr.projectId === mr.projectId;
+		const scroll = same ? (this.detail?.scroll ?? 0) : 0;
 
 		this.mode = "detail";
 		const width = this.width - 2;
@@ -826,20 +1032,34 @@ class App {
 			},
 		];
 		const extras: string[] = [];
-		if (mr.labels.length > 0) extras.push(`${C.gray}labels:${C.reset} ${mr.labels.join(", ")}`);
-		if (mr.reviewers.length > 0) extras.push(`${C.gray}reviewers:${C.reset} ${mr.reviewers.join(", ")}`);
-		if (mr.assignees.length > 0) extras.push(`${C.gray}assignees:${C.reset} ${mr.assignees.join(", ")}`);
-		if (mr.comments > 0) extras.push(`${C.gray}comments:${C.reset} ${mr.comments}`);
+		if (mr.labels.length > 0)
+			extras.push(`${C.gray}labels:${C.reset} ${mr.labels.join(", ")}`);
+		if (mr.reviewers.length > 0)
+			extras.push(`${C.gray}reviewers:${C.reset} ${mr.reviewers.join(", ")}`);
+		if (mr.assignees.length > 0)
+			extras.push(`${C.gray}assignees:${C.reset} ${mr.assignees.join(", ")}`);
+		if (mr.comments > 0)
+			extras.push(`${C.gray}comments:${C.reset} ${mr.comments}`);
 		if (mr.hasConflicts) extras.push(`${C.red}conflicts${C.reset}`);
-		if (extras.length > 0) meta.push({ kind: "text", text: extras.join(`${C.gray} · ${C.reset}`) });
+		if (extras.length > 0)
+			meta.push({ kind: "text", text: extras.join(`${C.gray} · ${C.reset}`) });
 		meta.push({ kind: "text", text: `${C.gray}${mr.url}${C.reset}` });
-		meta.push({ kind: "text", text: `${C.gray}${"─".repeat(Math.min(width, 60))}${C.reset}` });
+		meta.push({
+			kind: "text",
+			text: `${C.gray}${"─".repeat(Math.min(width, 60))}${C.reset}`,
+		});
 
 		const body = mr.description.trim()
 			? renderMarkdown(mr.description, width)
-			: [{ kind: "text", text: `${C.gray}${C.italic}no description${C.reset}` } as MdRow];
+			: [
+					{
+						kind: "text",
+						text: `${C.gray}${C.italic}no description${C.reset}`,
+					} as MdRow,
+				];
 
-		this.detail = { mr, rows: [...meta, ...body], scroll: 0 };
+		const rows = [...meta, ...body];
+		this.detail = { mr, rows, scroll: Math.min(scroll, rows.length - 1) };
 		void this.loadImages();
 	}
 
@@ -847,13 +1067,14 @@ class App {
 		const detail = this.detail;
 		if (!detail || this.protocol === "none") return;
 
-		const host = new URL(detail.mr.url).host;
-		const token = tokenFor(host);
-		const base = detail.mr.url.replace(/\/-\/merge_requests\/\d+.*$/, "");
-
 		const urls = detail.rows
 			.filter((r): r is Extract<MdRow, { kind: "image" }> => r.kind === "image")
 			.map((r) => r.url);
+		if (urls.length === 0) return; // tokenFor spawns glab — not for nothing
+
+		const host = new URL(detail.mr.url).host;
+		const token = tokenFor(host);
+		const base = detail.mr.url.replace(/\/-\/merge_requests\/\d+.*$/, "");
 
 		await Promise.all(
 			urls.map(async (url) => {
@@ -861,7 +1082,9 @@ class App {
 				this.images.set(url, { status: "loading" });
 				this.render();
 
-				const absolute = /^https?:/.test(url) ? url : `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+				const absolute = /^https?:/.test(url)
+					? url
+					: `${base}${url.startsWith("/") ? "" : "/"}${url}`;
 				const data = await loadImage(absolute, { host, token });
 				if (!data) {
 					this.images.set(url, { status: "failed" });
@@ -886,7 +1109,14 @@ class App {
 		const mr = this.currentMR;
 		if (!mr) return;
 
-		this.jobs = { mr, pipeline: null, items: [], cursor: 0, loading: true, origin };
+		this.jobs = {
+			mr,
+			pipeline: null,
+			items: [],
+			cursor: 0,
+			loading: true,
+			origin,
+		};
 		this.mode = "jobs";
 		this.render();
 
@@ -921,9 +1151,12 @@ class App {
 
 		// stage order as GitLab returns it, jobs newest attempt last
 		const stages: string[] = [];
-		for (const job of items) if (!stages.includes(job.stage)) stages.push(job.stage);
+		for (const job of items)
+			if (!stages.includes(job.stage)) stages.push(job.stage);
 		jobs.items = items.sort(
-			(a, b) => stages.indexOf(a.stage) - stages.indexOf(b.stage) || a.name.localeCompare(b.name),
+			(a, b) =>
+				stages.indexOf(a.stage) - stages.indexOf(b.stage) ||
+				a.name.localeCompare(b.name),
 		);
 		jobs.cursor = Math.min(jobs.cursor, Math.max(0, jobs.items.length - 1));
 		jobs.loading = false;
@@ -942,7 +1175,14 @@ class App {
 			const jobs = this.jobs;
 			if (!jobs || this.mode !== "jobs" || this.confirm) return;
 			const active = jobs.items.some((j) =>
-				["running", "pending", "created", "preparing", "waiting_for_resource", "scheduled"].includes(j.status),
+				[
+					"running",
+					"pending",
+					"created",
+					"preparing",
+					"waiting_for_resource",
+					"scheduled",
+				].includes(j.status),
 			);
 			if (active) void this.refreshJobs();
 		}, 5000);
@@ -1011,10 +1251,16 @@ class App {
 	}
 
 	private footer(defaultHints: string, right = ""): string {
-		if (this.confirm) return `${C.yellow}${this.confirm.question}${C.reset} ${C.bold}y/n${C.reset}`;
-		const left = this.status ? `${this.status}${C.reset}` : `${defaultHints}${C.reset}`;
+		if (this.confirm)
+			return `${C.yellow}${this.confirm.question}${C.reset} ${C.bold}y/n${C.reset}`;
+		const left = this.status
+			? `${this.status}${C.reset}`
+			: `${defaultHints}${C.reset}`;
 		if (!right) return left;
-		const pad = Math.max(1, this.width - displayWidth(left) - displayWidth(right));
+		const pad = Math.max(
+			1,
+			this.width - displayWidth(left) - displayWidth(right),
+		);
 		return `${left}${" ".repeat(pad)}${C.gray}${right}${C.reset}`;
 	}
 
@@ -1039,7 +1285,9 @@ class App {
 
 	private renderList(): void {
 		const rows: Row[] = [];
-		const counter = this.busy ? "loading…" : `${this.view.length}/${this.all.length}`;
+		const counter = this.busy
+			? "loading…"
+			: `${this.view.length}/${this.all.length}`;
 		const prompt = this.filtering
 			? `${C.bold}/${C.reset}${this.query}${C.cyan}▏${C.reset}`
 			: this.query
@@ -1052,7 +1300,14 @@ class App {
 		const height = this.height - 1;
 		const slice = this.view.slice(this.offset, this.offset + height);
 		for (const [i, mr] of slice.entries()) {
-			rows.push(listLine(mr, this.pipelines.get(mr.sha), this.offset + i === this.cursor, this.width));
+			rows.push(
+				listLine(
+					mr,
+					this.pipelines.get(mr.sha),
+					this.offset + i === this.cursor,
+					this.width,
+				),
+			);
 		}
 		this.pad(rows, slice.length + 1);
 
@@ -1077,8 +1332,16 @@ class App {
 		}
 		this.pad(rows, used);
 
-		const position = detail.rows.length > 0 ? Math.round((index / detail.rows.length) * 100) : 100;
-		rows.push(this.footer(DETAIL_HINTS, `${position}%`));
+		const position =
+			detail.rows.length > 0
+				? Math.round((index / detail.rows.length) * 100)
+				: 100;
+		rows.push(
+			this.footer(
+				this.single ? DETAIL_HINTS_ALONE : DETAIL_HINTS,
+				`${position}%`,
+			),
+		);
 		this.screen.draw(rows);
 	}
 
@@ -1126,7 +1389,13 @@ class App {
 
 		const height = this.height - 1;
 		const focus = cursorLines[jobs.cursor] ?? 0;
-		const start = Math.max(0, Math.min(focus - Math.floor(height / 2), Math.max(0, lines.length - height)));
+		const start = Math.max(
+			0,
+			Math.min(
+				focus - Math.floor(height / 2),
+				Math.max(0, lines.length - height),
+			),
+		);
 		const slice = lines.slice(start, start + height);
 		for (const line of slice) rows.push(line);
 		this.pad(rows, slice.length + 1);
@@ -1152,13 +1421,14 @@ class App {
 		this.pad(rows, slice.length + 1);
 
 		const end = Math.min(log.scroll + height, log.lines.length);
-		const position = log.lines.length > 0 ? Math.round((end / log.lines.length) * 100) : 100;
+		const position =
+			log.lines.length > 0 ? Math.round((end / log.lines.length) * 100) : 100;
 		rows.push(this.footer(LOG_HINTS, `${position}%`));
 		this.screen.draw(rows);
 	}
 
 	private renderHelp(): void {
-		const rows: Row[] = HELP.split("\n").slice(0, this.height);
+		const rows: Row[] = KEYS.split("\n").slice(0, this.height);
 		this.pad(rows, rows.length);
 		rows.push(this.footer(`${C.gray}any key returns${C.reset}`));
 		this.screen.draw(rows);
@@ -1167,15 +1437,119 @@ class App {
 
 // --------------------------------------------------------------------- entry
 
-const args = process.argv.slice(2);
-if (args.includes("-h") || args.includes("--help")) {
+const argv = process.argv.slice(2);
+if (argv.includes("-h") || argv.includes("--help")) {
 	process.stdout.write(HELP);
 	process.exit(0);
 }
+
+const die = (message: string, code = 1): never => {
+	console.error(message);
+	process.exit(code);
+};
+
+// `glab mr list` flags that eat the next argument. A merge request is the one
+// positional argument of the command line, and this is how to tell it apart
+// from `--search 3614`, which looks exactly like one.
+const VALUED = new Set(
+	`-a --assignee --author --created-after --created-before --deployed-after --deployed-before
+	 --environment -g --group --jq -l --label -m --milestone --not-label -o --order -F --output
+	 -p --page -P --per-page -R --repo -r --reviewer --search -S --sort -s --source-branch
+	 -t --target-branch`.split(/\s+/),
+);
+
+/** One pass over the command line: -y and -Y are ours, the merge request is the
+ *  argument that is neither a flag nor a flag's value, and everything left over
+ *  belongs to `glab mr list`. Values are skipped rather than examined, so
+ *  `--search -y` and `--search 3614` stay what the user meant. */
+function parseArgv(list: string[]): {
+	copyKind: "rich" | "markdown" | null;
+	rest: string[];
+	repo?: string;
+	mrs: string[];
+} {
+	let copyKind: "rich" | "markdown" | null = null;
+	const rest: string[] = [];
+	const mrs: string[] = [];
+	let repo: string | undefined;
+
+	for (let i = 0; i < list.length; i += 1) {
+		const a = list[i] ?? "";
+
+		if (!a.startsWith("-")) {
+			mrs.push(a);
+			continue;
+		}
+
+		if (a === "-y" || a === "--copy") copyKind = "rich";
+		else if (a === "-Y" || a === "--copy-markdown") copyKind = "markdown";
+		else rest.push(a);
+
+		// -R group/project, --repo=group/project and -Rgroup/project all count
+		if (a === "-R" || a === "--repo") repo = list[i + 1];
+		else repo = /^(?:--repo=|-R)(.+)$/.exec(a)?.[1] ?? repo;
+
+		if (VALUED.has(a)) {
+			const value = list[i + 1];
+			if (value !== undefined) rest.push(value);
+			i += 1;
+		}
+	}
+
+	return { copyKind, rest, repo, mrs };
+}
+
+const { copyKind, rest: args, repo, mrs } = parseArgv(argv);
+
+// one at a time — `glab mr list` has no positional arguments of its own, so a
+// second one is a mistake rather than something to pass on
+if (mrs.length > 1) die(`one merge request at a time, got ${mrs.length}`, 2);
+
+const mr = mrs[0];
+const ref = mr === undefined ? null : parseMRRef(mr, repo);
+if (!ref && mr !== undefined) {
+	die(`not a merge request: ${mr} — give a link, or !123 in its repository`, 2);
+}
+
+if (copyKind && !ref) {
+	die("--copy needs a merge request: a link, or !123 in its repository", 2);
+}
+
+const single = ref
+	? await fetchMR(ref).catch((err: Error) =>
+			die(`${err.message.split("\n")[0]}`),
+		)
+	: null;
+
+if (copyKind && single) {
+	if (copyKind === "markdown") {
+		copyText(`[${single.title}](${single.url})`);
+	} else if (!copyRichLink(single.title, single.url)) {
+		die(`could not reach the clipboard — !${single.iid} was not copied`);
+	}
+
+	// what was copied, in the row it has on the list — the check stands where
+	// the cursor would. A pipe gets the same line without the colors.
+	const pipeline = pipelineState(
+		await pipelineForSha(single.projectId, single.sha),
+	);
+	const row = mrRow(
+		single,
+		pipeline,
+		`${C.green}✓${C.reset} `,
+		false,
+		process.stdout.columns || 1000,
+	);
+	console.log(
+		process.stdout.isTTY && !process.env.NO_COLOR ? row : stripAnsi(row),
+	);
+	process.exit(0);
+}
+
 if (!process.stdout.isTTY) {
 	console.error("glab-mrs needs a terminal");
 	process.exit(1);
 }
 
-await new App(args).run();
+await new App(args, single).run();
 process.exit(0);
