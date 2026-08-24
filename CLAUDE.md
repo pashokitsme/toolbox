@@ -54,7 +54,9 @@ inside that directory. Its files split as: `main.ts` (app: modes, key handling,
 rendering), `term.ts` (colors, width-aware string ops, key decoding,
 alternate-screen surface), `markdown.ts` (markdown→ANSI), `images.ts` (fetch,
 sizing, terminal graphics protocols), `glab.ts` (every subprocess — `glab`, the
-browser, the clipboard, the CI endpoints).
+browser, the clipboard, the CI endpoints). It is on `PATH` twice: `bin/glab-mrs`
+and `bin/glmr` are two links to the same `main.ts`, so the name it is called by
+is not something the tool can read — `--help` spells both out by hand.
 
 `bin/git-ai-commit` has a byte-identical twin in the `gramax-team` workspace as
 `git-ai-commit.sh`, which predates this repo. Change it here.
