@@ -13,6 +13,7 @@
 #   -e, --eval <js>       Evaluate JS in the page, print the result, exit
 #   -o, --output <file>   Write here instead of the cache directory
 #   -n, --lines <n>       Preview lines to print (default 40; 0 prints none)
+#   -b, --max-bytes <n>   Cap the preview at n bytes (default 4096; 0 lifts it)
 #   -f, --full            Print the whole document to stdout, save nothing
 #   -l, --local           Allow loopback and LAN addresses (dev servers)
 #       --shot <file>     Also save a PNG screenshot of the page
@@ -71,6 +72,7 @@ WAIT_UNTIL=""
 WAIT=""
 TIMEOUT=""
 MIN_TEXT=100
+MAX_BYTES=4096
 
 # The header comment is the help text. Print it by shape — from line 2 to the
 # first line that is not a comment — so adding a line to it cannot desync the
@@ -104,6 +106,8 @@ while [ $# -gt 0 ]; do
     -l|--local)      LOCAL=1; shift ;;
     --shot)          SHOT="${2:?--shot needs a value}"; shift 2 ;;
     --shot=*)        SHOT="${1#*=}"; shift ;;
+    -b|--max-bytes)  MAX_BYTES="${2:?--max-bytes needs a value}"; shift 2 ;;
+    --max-bytes=*)   MAX_BYTES="${1#*=}"; shift ;;
     --min-text)      MIN_TEXT="${2:?--min-text needs a value}"; shift 2 ;;
     --min-text=*)    MIN_TEXT="${1#*=}"; shift ;;
     --no-stealth)    STEALTH=0; shift ;;
@@ -130,6 +134,7 @@ https://github.com/h4ckf0r0day/obscura --tag <tag> obscura-cli \
 [ -n "$URL" ] || { echo "ofetch: no URL given" >&2; usage >&2; exit 2; }
 
 want_int --lines "$LINES"
+want_int --max-bytes "$MAX_BYTES"
 want_int --min-text "$MIN_TEXT"
 
 # Flags that contradict each other used to resolve by silently dropping one of
@@ -168,7 +173,7 @@ fi
 
 FETCH_ARGS+=(--dump "$DUMP")
 
-if [ "$FULL" -eq 1 ] && [ -z "$OUTPUT" ]; then
+if [ "$FULL" -eq 1 ]; then
   exec obscura "${ROOT_ARGS[@]+"${ROOT_ARGS[@]}"}" fetch "$URL" "${FETCH_ARGS[@]}"
 fi
 
@@ -210,10 +215,20 @@ BYTES="$(wc -c < "$OUTPUT" | tr -d ' ')"
 echo "$OUTPUT  ($TOTAL lines, $BYTES bytes)"
 [ -n "$SHOT" ] && echo "$SHOT  (screenshot)"
 
+# Lines are the wrong unit for a byte budget: a minified html dump is one line
+# of tens of kilobytes, so -n alone would hand the whole thing to the reader.
 if [ "$LINES" -gt 0 ]; then
   echo
-  head -n "$LINES" "$OUTPUT"
-  [ "$TOTAL" -gt "$LINES" ] && echo && echo "... $((TOTAL - LINES)) more lines in $OUTPUT"
+  PREVIEW_BYTES="$(head -n "$LINES" "$OUTPUT" | wc -c | tr -d ' ')"
+  if [ "$MAX_BYTES" -gt 0 ] && [ "$PREVIEW_BYTES" -gt "$MAX_BYTES" ]; then
+    head -n "$LINES" "$OUTPUT" | head -c "$MAX_BYTES"
+    echo
+    echo
+    echo "... preview cut at $MAX_BYTES of $PREVIEW_BYTES bytes; whole document in $OUTPUT"
+  else
+    head -n "$LINES" "$OUTPUT"
+    [ "$TOTAL" -gt "$LINES" ] && echo && echo "... $((TOTAL - LINES)) more lines in $OUTPUT"
+  fi
 fi
 
 # A dump this thin means the page did not render, not that the page is short.
