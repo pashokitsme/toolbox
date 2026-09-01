@@ -2,8 +2,8 @@
 
 Personal command-line tools and application configs that live on this machine.
 This checkout is the source of truth: `install.sh` only creates symlinks into
-`~/.local/bin` and `~/.config`, so editing a file here changes the installed
-tool or config immediately — there is no build or copy step to remember.
+`~/.local/bin`, `~/.config` and `~/.claude/skills`, so editing a file here
+changes the installed tool, config or skill immediately — there is no build or copy step to remember.
 
 **Each tool's own `--help` is its documentation.** Flags, keys, environment
 variables and behavior belong there (or in the header comment for scripts
@@ -19,7 +19,8 @@ one-liner stopped being true.
 | `bin/` | Everything that ends up on `PATH`. One self-contained script per tool, or a symlink into `lib/` for tools that span several files. |
 | `lib/<tool>/` | Multi-file tools with their own dependencies (`package.json`, lockfile, config). |
 | `config/<app>` | Application configs, one entry per `~/.config` name — a whole directory (`config/helix`) or a single file (`config/starship.toml`). |
-| `install.sh` | Links `bin/*` into `$PREFIX/bin` (default `~/.local`) and `config/*` into `$XDG_CONFIG_HOME` (default `~/.config`), installs `lib/` dependencies, reports missing external commands. |
+| `skills/<name>/` | Claude skills, one directory per skill with a `SKILL.md`. Linked into `~/.claude/skills`, so they apply in every project, not just this one. |
+| `install.sh` | Links `bin/*` into `$PREFIX/bin` (default `~/.local`), `config/*` into `$XDG_CONFIG_HOME` (default `~/.config`) and `skills/*` into `~/.claude/skills`, installs `lib/` dependencies, reports missing external commands. |
 
 Adding a tool: drop a single executable file in `bin/`, or put the package in
 `lib/<name>/` and symlink `bin/<name> -> ../lib/<name>/<entrypoint>`. Then
@@ -35,8 +36,8 @@ here.
 
 ## install.sh
 
-`bin/` and `config/` go through the same `link_tree`, so both behave the same
-way. `--force` is needed when something real (not a link) already sits on a
+`bin/`, `config/` and `skills/` go through the same `link_tree`, so all three
+behave the same way. `--force` is needed when something real (not a link) already sits on a
 target name — it may be the user's own copy, so it is moved to `<name>.bak`
 rather than deleted, and a `<name>.bak` already in the way stops the entry.
 `--dry-run` prints the plan; `--no-config` skips `~/.config` entirely.
@@ -57,6 +58,14 @@ sizing, terminal graphics protocols), `glab.ts` (every subprocess — `glab`, th
 browser, the clipboard, the CI endpoints). It is on `PATH` twice: `bin/glab-mrs`
 and `bin/glmr` are two links to the same `main.ts`, so the name it is called by
 is not something the tool can read — `--help` spells both out by hand.
+
+`adoc` is **not in this checkout at all** — it is [its own
+tool](https://github.com/pashokitsme/adoc), and `install.sh` installs it with
+`bun install -g github:pashokitsme/adoc`, plus its agent skill through `gh skill
+install`. Nothing here links to it, so changing that tool means working in its
+own repository. Note that re-running `bun install -g` does not pick up a new
+commit — it keeps the cached git ref even with `--force`; updating is
+`bun remove -g adoc` followed by a fresh install.
 
 `bin/git-ai-commit` has a byte-identical twin in the `gramax-team` workspace as
 `git-ai-commit.sh`, which predates this repo. Change it here.
