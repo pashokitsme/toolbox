@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+#
+# ofetch — fetch a page with obscura, save it, print the path and a preview.
+#
+# Usage:
+#   ofetch [options] <url>
+#
+# Options:
+#   -d, --dump <format>   markdown | text | html | links | assets | cookies |
+#                         original (default: markdown)
+#   -s, --selector <css>  Wait for this element before dumping — a readiness
+#                         check for lazy pages, NOT a way to narrow the output
+#   -e, --eval <js>       Evaluate JS in the page, print the result, exit
+#   -o, --output <file>   Write here instead of the cache directory
+#   -n, --lines <n>       Preview lines to print (default 40; 0 prints none)
+#   -f, --full            Print the whole document to stdout, save nothing
+#   -l, --local           Allow loopback and LAN addresses (dev servers)
+#       --shot <file>     Also save a PNG screenshot of the page
+#       --min-text <n>    Treat a dump under n bytes as a failed render
+#                         (default 100; 0 disables the check)
+#       --no-stealth      Drop the consistent-fingerprint stealth mode
+#       --wait-until <l>  domcontentloaded | load | networkidle2 | networkidle0
+#       --wait <s>        Settle time after load, in seconds
+#       --timeout <s>     Navigation timeout in seconds (default 30)
+#   -h, --help            Show this help and exit
+#
+# Why a file instead of stdout: `obscura fetch --dump markdown` prints the
+# whole page, and a whole page pasted into an agent's context is expensive.
+# Writing it to $OFETCH_DIR (default $TMPDIR/ofetch) and printing only the
+# path plus a short preview lets the reader grep or sed out the part it
+# actually needs. `--full` opts back out of that when the page is small.
+#
+# The file name is host + path + a hash of the full URL, so re-fetching the
+# same URL overwrites its own file instead of littering the directory.
+#
+# To read one region of a page rather than all of it, obscura has no output
+# filter — `--selector` only waits. Use JS instead:
+#   ofetch -e "document.querySelector('main').innerText" https://example.com
+#
+# `--shot` needs an obscura built with the `render` feature — obscura's default
+# build has it off, and a binary without it fails with a message naming the
+# feature rather than writing a file.
+#
+# obscura blocks loopback, RFC1918 and link-local addresses by default (its
+# SSRF guard), so a dev server needs `--local`:
+#   ofetch --local http://localhost:5173
+#
+# A heavy SPA can fail to bootstrap and still leave obscura reporting success —
+# the dump comes back empty or near-empty and the exit code is 0. `--min-text`
+# turns that into an explicit failure: under the threshold ofetch warns on
+# stderr, and for the text-shaped dumps (markdown, text, html) it exits 3.
+# Retry with `--wait-until networkidle0 --wait 5 --timeout 120`, or raise
+# obscura's script budget with OBSCURA_SCRIPT_DEADLINE_MS.
+
+set -euo pipefail
+
+trap 'status=$?; echo "ofetch: line $LINENO exited $status" >&2' ERR
+
+# --- defaults ------------------------------------------------------------
+URL=""
+DUMP="markdown"
+SELECTOR=""
+EVAL_JS=""
+OUTPUT=""
+LINES=40
+FULL=0
+SHOT=""
+STEALTH=1
+LOCAL=0
+WAIT_UNTIL=""
+WAIT=""
+TIMEOUT=""
+MIN_TEXT=100
+
+# The header comment is the help text. Print it by shape — from line 2 to the
+# first line that is not a comment — so adding a line to it cannot desync the
+# help the way a hard-coded line range does.
+usage() { sed -n '2,/^[^#]/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
+
+die() { echo "ofetch: $1" >&2; exit "${2:-2}"; }
+
+# Every numeric flag takes a non-negative integer; bash's own `[: abc: integer
+# expected` further down is a worse error message than saying so here.
+want_int() {
+  case "$2" in
+    ''|*[!0-9]*) die "$1 needs a non-negative integer, got '$2'" ;;
+  esac
+}
+
+# --- parse args ----------------------------------------------------------
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -d|--dump)       DUMP="${2:?--dump needs a value}"; shift 2 ;;
+    --dump=*)        DUMP="${1#*=}"; shift ;;
+    -s|--selector)   SELECTOR="${2:?--selector needs a value}"; shift 2 ;;
+    --selector=*)    SELECTOR="${1#*=}"; shift ;;
+    -e|--eval)       EVAL_JS="${2:?--eval needs a value}"; shift 2 ;;
+    --eval=*)        EVAL_JS="${1#*=}"; shift ;;
+    -o|--output)     OUTPUT="${2:?--output needs a value}"; shift 2 ;;
+    --output=*)      OUTPUT="${1#*=}"; shift ;;
+    -n|--lines)      LINES="${2:?--lines needs a value}"; shift 2 ;;
+    --lines=*)       LINES="${1#*=}"; shift ;;
+    -f|--full)       FULL=1; shift ;;
+    -l|--local)      LOCAL=1; shift ;;
+    --shot)          SHOT="${2:?--shot needs a value}"; shift 2 ;;
+    --shot=*)        SHOT="${1#*=}"; shift ;;
+    --min-text)      MIN_TEXT="${2:?--min-text needs a value}"; shift 2 ;;
+    --min-text=*)    MIN_TEXT="${1#*=}"; shift ;;
+    --no-stealth)    STEALTH=0; shift ;;
+    --wait-until)    WAIT_UNTIL="${2:?--wait-until needs a value}"; shift 2 ;;
+    --wait-until=*)  WAIT_UNTIL="${1#*=}"; shift ;;
+    --wait)          WAIT="${2:?--wait needs a value}"; shift 2 ;;
+    --wait=*)        WAIT="${1#*=}"; shift ;;
+    --timeout)       TIMEOUT="${2:?--timeout needs a value}"; shift 2 ;;
+    --timeout=*)     TIMEOUT="${1#*=}"; shift ;;
+    -h|--help)       usage; exit 0 ;;
+    --)              shift; URL="${1:-$URL}"; break ;;
+    -*)              echo "ofetch: unknown option '$1'" >&2; usage >&2; exit 2 ;;
+    *)               URL="$1"; shift ;;
+  esac
+done
+
+# --- sanity --------------------------------------------------------------
+# Deliberately not `brew install obscura`: the formula builds with no features,
+# so a brew copy has neither `render` (--shot) nor `stealth`.
+command -v obscura >/dev/null 2>&1 || {
+  echo "ofetch: 'obscura' not found in PATH — cargo install --git \
+https://github.com/h4ckf0r0day/obscura --tag <tag> obscura-cli \
+--features stealth,render --locked" >&2; exit 1; }
+[ -n "$URL" ] || { echo "ofetch: no URL given" >&2; usage >&2; exit 2; }
+
+want_int --lines "$LINES"
+want_int --min-text "$MIN_TEXT"
+
+# Flags that contradict each other used to resolve by silently dropping one of
+# them, which is indistinguishable from the tool ignoring what was typed.
+[ "$FULL" -eq 1 ] && [ -n "$OUTPUT" ] && die "--full writes nothing, so it cannot be combined with --output"
+[ -n "$EVAL_JS" ] && [ -n "$OUTPUT" ] && die "--eval prints its result, so it cannot be combined with --output"
+[ -n "$EVAL_JS" ] && [ "$FULL" -eq 1 ] && die "--eval and --full both own stdout; pick one"
+
+# Bare hosts are the common case when pasting from a search result or a doc.
+case "$URL" in
+  http://*|https://*|file://*) ;;
+  *) URL="https://$URL" ;;
+esac
+
+# --- build the obscura command -------------------------------------------
+# --stealth is a root flag, so it goes before the subcommand; everything else
+# belongs to `fetch` and goes after the URL.
+ROOT_ARGS=()
+[ "$STEALTH" -eq 1 ] && ROOT_ARGS+=(--stealth)
+[ "$LOCAL" -eq 1 ]   && ROOT_ARGS+=(--allow-private-network)
+
+FETCH_ARGS=(--quiet)
+[ -n "$SELECTOR" ]   && FETCH_ARGS+=(--selector "$SELECTOR")
+[ -n "$WAIT_UNTIL" ] && FETCH_ARGS+=(--wait-until "$WAIT_UNTIL")
+[ -n "$WAIT" ]       && FETCH_ARGS+=(--wait "$WAIT")
+[ -n "$TIMEOUT" ]    && FETCH_ARGS+=(--timeout "$TIMEOUT")
+[ -n "$SHOT" ]       && FETCH_ARGS+=(--screenshot "$SHOT")
+
+# --eval answers a question about the page rather than returning the page, so
+# it has nothing worth saving to a file — print the result and be done.
+# --dump is left off on purpose: obscura honours both at once and would print
+# the entire page ahead of the answer.
+if [ -n "$EVAL_JS" ]; then
+  exec obscura "${ROOT_ARGS[@]+"${ROOT_ARGS[@]}"}" fetch "$URL" "${FETCH_ARGS[@]}" --eval "$EVAL_JS"
+fi
+
+FETCH_ARGS+=(--dump "$DUMP")
+
+if [ "$FULL" -eq 1 ] && [ -z "$OUTPUT" ]; then
+  exec obscura "${ROOT_ARGS[@]+"${ROOT_ARGS[@]}"}" fetch "$URL" "${FETCH_ARGS[@]}"
+fi
+
+# --- pick the destination file -------------------------------------------
+if [ -z "$OUTPUT" ]; then
+  # $TMPDIR carries a trailing slash on macOS; without stripping it every
+  # printed path comes out with a "//" in the middle.
+  DIR="${OFETCH_DIR:-${TMPDIR:-/tmp}}"
+  DIR="${DIR%/}"
+  [ -n "${OFETCH_DIR:-}" ] || DIR="$DIR/ofetch"
+  mkdir -p "$DIR"
+
+  # host + path, with everything that is not a filename character folded to
+  # '-', plus a hash so two URLs that flatten to the same name stay apart.
+  SLUG="$(printf '%s' "${URL#*://}" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//')"
+  SLUG="${SLUG:0:80}"
+  HASH="$(printf '%s' "$URL" | shasum | cut -c1-8)"
+
+  case "$DUMP" in
+    markdown)       EXT="md" ;;
+    html)           EXT="html" ;;
+    assets|cookies) EXT="json" ;;
+    original)       EXT="raw" ;;
+    *)              EXT="txt" ;;
+  esac
+
+  OUTPUT="$DIR/$SLUG-$HASH.$EXT"
+fi
+
+# Run it in a condition so obscura's own error message stands alone instead of
+# being buried under the ERR trap repeating the whole command line.
+if ! obscura "${ROOT_ARGS[@]+"${ROOT_ARGS[@]}"}" fetch "$URL" "${FETCH_ARGS[@]}" --output "$OUTPUT"; then
+  die "obscura could not fetch $URL" 1
+fi
+
+# --- report --------------------------------------------------------------
+TOTAL="$(wc -l < "$OUTPUT" | tr -d ' ')"
+BYTES="$(wc -c < "$OUTPUT" | tr -d ' ')"
+echo "$OUTPUT  ($TOTAL lines, $BYTES bytes)"
+[ -n "$SHOT" ] && echo "$SHOT  (screenshot)"
+
+if [ "$LINES" -gt 0 ]; then
+  echo
+  head -n "$LINES" "$OUTPUT"
+  [ "$TOTAL" -gt "$LINES" ] && echo && echo "... $((TOTAL - LINES)) more lines in $OUTPUT"
+fi
+
+# A dump this thin means the page did not render, not that the page is short.
+# obscura exits 0 either way, so this is the only place the difference can be
+# reported. `links`/`assets`/`cookies` can legitimately come back empty, so
+# they get the warning without the failing status.
+if [ "$MIN_TEXT" -gt 0 ] && [ "$BYTES" -lt "$MIN_TEXT" ]; then
+  echo "ofetch: only $BYTES bytes of '$DUMP' — the page most likely did not \
+render (heavy SPA, blocked request, or too short a wait). Retry with \
+--wait-until networkidle0 --wait 5 --timeout 120, raise \
+OBSCURA_SCRIPT_DEADLINE_MS, or pass --min-text 0 to silence this." >&2
+  case "$DUMP" in
+    markdown|text|html) exit 3 ;;
+  esac
+fi
+
+exit 0
