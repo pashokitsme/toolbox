@@ -1,0 +1,13 @@
+{
+	"name": "ccp",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Claude Code account profiles: several logins on one machine, one shared session history",
+	"bin": {
+		"ccp": "./main.ts"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
+}
