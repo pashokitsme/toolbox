@@ -5,9 +5,9 @@
 //   ~/.claude-profiles/<name>/   one entry per account: a real .claude.json,
 //                                private credential state, and a symlink into
 //                                ~/.claude-shared for every other entry
-//   ~/.claude-profiles/.default  name of the profile the two links below point at
-//   ~/.claude       -> ~/.claude-profiles/<default>
-//   ~/.claude.json  -> ~/.claude-profiles/<default>/.claude.json
+//   ~/.claude-profiles/.current  name of the profile the two links below point at
+//   ~/.claude       -> ~/.claude-profiles/<current>
+//   ~/.claude.json  -> ~/.claude-profiles/<current>/.claude.json
 //
 // Two links, not one, because Claude Code keeps its account in two places
 // depending on how it was started: with CLAUDE_CONFIG_DIR set the global config
@@ -29,13 +29,13 @@ import { join } from "node:path";
 export const HOME = homedir();
 export const PROFILES_DIR = join(HOME, ".claude-profiles");
 export const SHARED_DIR = join(HOME, ".claude-shared");
-export const DEFAULT_FILE = join(PROFILES_DIR, ".default");
+export const CURRENT_FILE = join(PROFILES_DIR, ".current");
 /** Name of the profile whose Desktop-app login is the live one (see desktop.ts). */
 export const DESKTOP_FILE = join(PROFILES_DIR, ".desktop");
 /** The Desktop app's session list, shared between accounts (see desktop.ts). */
 export const APP_SESSIONS_SHARED = join(PROFILES_DIR, ".app-sessions");
 
-/** The two symlinks `ccp default` retargets. */
+/** The two symlinks `ccp use` retargets. */
 export const CONFIG_LINK = join(HOME, ".claude");
 export const GLOBAL_CONFIG_LINK = join(HOME, ".claude.json");
 
@@ -71,7 +71,7 @@ export function isIgnored(entry: string): boolean {
 
 // Words that can never be a profile name, because `ccp <name>` is shorthand for
 // `ccp use <name>` and a subcommand has to win the collision.
-export const RESERVED = new Set(["use", "ls", "list", "new", "default", "app", "doctor", "relink", "migrate", "help", "-"]);
+export const RESERVED = new Set(["use", "ls", "list", "new", "app", "doctor", "relink", "migrate", "help"]);
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 

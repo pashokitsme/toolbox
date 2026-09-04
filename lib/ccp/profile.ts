@@ -18,7 +18,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import {
 	CONFIG_LINK,
-	DEFAULT_FILE,
+	CURRENT_FILE,
 	GLOBAL_CONFIG,
 	GLOBAL_CONFIG_LINK,
 	PROFILES_DIR,
@@ -68,7 +68,7 @@ export type Profile = {
 	name: string;
 	dir: string;
 	account?: Account;
-	isDefault: boolean;
+	isCurrent: boolean;
 	isActive: boolean;
 };
 
@@ -133,16 +133,17 @@ function planLabel(oauth: Json): string {
 	return mult ? `${base} ${mult}x` : base;
 }
 
-export function readDefault(): string | undefined {
+/** The profile the machine is on: what the links point at and new shells pick up. */
+export function readCurrent(): string | undefined {
 	try {
-		const name = readFileSync(DEFAULT_FILE, "utf8").trim();
+		const name = readFileSync(CURRENT_FILE, "utf8").trim();
 		return name || undefined;
 	} catch {
 		return undefined;
 	}
 }
 
-/** Which profile this shell is on: the env var wins, otherwise the default. */
+/** Which profile this shell is on: the env var wins, otherwise the machine-wide one. */
 export function activeName(): string | undefined {
 	const env = process.env.CLAUDE_CONFIG_DIR;
 	if (env) {
@@ -150,7 +151,7 @@ export function activeName(): string | undefined {
 		if (dirname(dir) === PROFILES_DIR) return basename(dir);
 		return undefined; // pointed somewhere ccp does not manage
 	}
-	return readDefault();
+	return readCurrent();
 }
 
 export function listNames(): string[] {
@@ -168,13 +169,13 @@ export function listNames(): string[] {
 }
 
 export function list(): Profile[] {
-	const def = readDefault();
+	const current = readCurrent();
 	const active = activeName();
 	return listNames().map((name) => ({
 		name,
 		dir: profileDir(name),
 		account: readAccount(name),
-		isDefault: name === def,
+		isCurrent: name === current,
 		isActive: name === active,
 	}));
 }
@@ -333,31 +334,31 @@ function retarget(link: string, target: string): void {
 	renameSync(tmp, link);
 }
 
-export function setDefault(name: string): void {
+export function setCurrent(name: string): void {
 	// Both checks before either change, so a refusal leaves the pair consistent.
 	assertRetargetable(CONFIG_LINK);
 	assertRetargetable(GLOBAL_CONFIG_LINK);
 	retarget(CONFIG_LINK, profileDir(name));
 	retarget(GLOBAL_CONFIG_LINK, join(profileDir(name), GLOBAL_CONFIG));
-	writeFileSync(DEFAULT_FILE, `${name}\n`);
+	writeFileSync(CURRENT_FILE, `${name}\n`);
 }
 
 export type Check = { ok: boolean; label: string; detail?: string };
 
 export function doctor(): Check[] {
 	const checks: Check[] = [];
-	const def = readDefault();
+	const current = readCurrent();
 
 	checks.push({
 		ok: existsSync(SHARED_DIR),
 		label: "~/.claude-shared exists",
 		detail: existsSync(SHARED_DIR) ? undefined : "run `ccp migrate <name>` first",
 	});
-	checks.push({ ok: def !== undefined, label: "a default profile is recorded", detail: def });
+	checks.push({ ok: current !== undefined, label: "a current profile is recorded", detail: current });
 
 	for (const [link, want] of [
-		[CONFIG_LINK, def ? profileDir(def) : undefined],
-		[GLOBAL_CONFIG_LINK, def ? join(profileDir(def), GLOBAL_CONFIG) : undefined],
+		[CONFIG_LINK, current ? profileDir(current) : undefined],
+		[GLOBAL_CONFIG_LINK, current ? join(profileDir(current), GLOBAL_CONFIG) : undefined],
 	] as const) {
 		if (!isLink(link)) {
 			checks.push({ ok: false, label: `${link} is a symlink`, detail: "it is a real file or missing" });
@@ -365,7 +366,7 @@ export function doctor(): Check[] {
 		}
 		checks.push({
 			ok: want !== undefined && linksTo(link, want),
-			label: `${link} points at the default profile`,
+			label: `${link} points at the current profile`,
 			detail: readlinkSync(link),
 		});
 	}

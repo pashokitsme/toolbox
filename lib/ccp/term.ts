@@ -1,6 +1,6 @@
 // Colors and the stdout/stderr split.
 //
-// `ccp use` and `ccp default` are meant to be run through the shell function,
+// `ccp use` is meant to be run through the shell function,
 // which evals ccp's stdout. So stdout carries shell code and nothing else —
 // every line a human reads goes to stderr, including errors and success notes.
 

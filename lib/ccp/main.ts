@@ -4,11 +4,10 @@
 //
 // Usage:
 //   ccp                     list profiles (same as `ccp ls`)
-//   ccp ls                  list profiles: account, plan, which is default
+//   ccp ls                  list profiles: account, plan, which one is current
 //   ccp <name>              switch to a profile: this shell now, and every new
 //                           shell and no-variable context from here on
 //   ccp use <name>          the same, and never ambiguous with a subcommand
-//   ccp use default         put this shell on the remembered profile (also `ccp -`)
 //   ccp use --no-app <name> the same, leaving the Desktop app alone
 //   ccp app <name>          tell ccp which profile the Desktop app is signed into
 //   ccp new <name>          create a profile, then log into it with /login
@@ -31,9 +30,8 @@
 //
 // Switching: `ccp use <name>` is the whole interface. It moves the shell it runs
 // in, retargets the two links below so every new shell and every no-variable
-// context follows, and is remembered until the next `ccp use`. A shell that was
-// on another profile stays there until it runs `ccp use`; `ccp use default`
-// brings it to the remembered one.
+// context follows, and stays current until the next `ccp use`. A shell that was
+// on another profile stays there until it runs `ccp use` itself.
 //
 // The Desktop app switches too. Its login is a few files under
 // ~/Library/Application Support/Claude (the claude.ai cookie, config.json with
@@ -55,8 +53,8 @@
 // Layout it maintains:
 //   ~/.claude-shared/            the one real config home
 //   ~/.claude-profiles/<name>/   a real .claude.json per account, links for the rest
-//   ~/.claude       -> ~/.claude-profiles/<default>
-//   ~/.claude.json  -> ~/.claude-profiles/<default>/.claude.json
+//   ~/.claude       -> ~/.claude-profiles/<current>
+//   ~/.claude.json  -> ~/.claude-profiles/<current>/.claude.json
 //
 // A profile changes the account and nothing else. Sessions, settings, CLAUDE.md,
 // skills, plugins, hooks, history — every entry of the config home is shared by
@@ -110,8 +108,8 @@ import {
 	isMigrated,
 	list,
 	listNames,
-	readDefault,
-	setDefault,
+	readCurrent,
+	setCurrent,
 	syncConfig,
 	wireShared,
 } from "./profile.ts";
@@ -122,10 +120,9 @@ import { C, emit, fail, say } from "./term.ts";
 const HELP = `${C.bold("ccp")} — Claude Code account profiles
 
   ${C.cyan("ccp")}                  list profiles
-  ${C.cyan("ccp ls")}               list profiles: account, plan, which is default
+  ${C.cyan("ccp ls")}               list profiles: account, plan, which one is current
   ${C.cyan("ccp <name>")}           switch to a profile — this shell, new shells, everything
   ${C.cyan("ccp use <name>")}       the same, unambiguous with subcommands
-  ${C.cyan("ccp use default")}      put this shell on the remembered profile (also ${C.cyan("ccp -")})
   ${C.cyan("ccp use --no-app <name>")}  switch the command line only, leave the Desktop app alone
   ${C.cyan("ccp app <name>")}       tell ccp which profile the Desktop app is signed into
   ${C.cyan("ccp new <name>")}       create a profile (log into it with /login)
@@ -182,13 +179,13 @@ function cmdList(): void {
 	const width = Math.max(...profiles.map((p) => p.name.length));
 	for (const p of profiles) {
 		const mark = p.isActive ? C.green("*") : " ";
-		const name = p.isDefault ? C.bold(p.name.padEnd(width)) : p.name.padEnd(width);
+		const name = p.isCurrent ? C.bold(p.name.padEnd(width)) : p.name.padEnd(width);
 		const account = p.account ? `${p.account.email}  ${C.dim(p.account.plan)}` : C.yellow("not logged in");
-		const tag = p.isDefault ? C.dim("  (remembered)") : "";
+		const tag = p.isCurrent ? C.dim("  (current)") : "";
 		say(` ${mark} ${name}  ${account}${tag}`);
 	}
 	const active = activeName();
-	if (active && active !== readDefault()) say(C.dim(`\n   this shell is still on ${active}; \`ccp use default\` brings it over`));
+	if (active && active !== readCurrent()) say(C.dim(`\n   this shell is still on ${active}; \`ccp use ${readCurrent()}\` brings it over`));
 	if (process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR !== undefined)
 		say(C.yellow("\n   CLAUDE_SECURESTORAGE_CONFIG_DIR is set — left over from an earlier ccp; open a new shell"));
 	if (appInstalled()) {
@@ -203,13 +200,12 @@ function cmdList(): void {
 	warnDuplicates();
 }
 
-/** Switch to a profile: this shell now, and the remembered default for everything else. */
+/** Switch to a profile: this shell now, and the machine-wide current for everything else. */
 function cmdUse(name: string, app: boolean): void {
 	requireMigrated();
-	if (name === "default") return cmdUseDefault();
 	requireProfile(name);
 	refresh(name);
-	setDefault(name);
+	setCurrent(name);
 	emitUse(name);
 	say(`${C.green("→")} ${C.cyan(name)}`);
 	if (app) {
@@ -260,23 +256,12 @@ function cmdApp(name: string): void {
 	say(`${C.green("✓")} the Desktop app is on ${C.cyan(name)}`);
 }
 
-/** Put this shell on the remembered profile, changing nothing else. */
-function cmdUseDefault(): void {
-	requireMigrated();
-	const def = readDefault();
-	if (!def) fail("no profile remembered yet", "`ccp use <name>` first");
-	requireProfile(def);
-	refresh(def);
-	emitUse(def);
-	say(`${C.green("→")} ${C.cyan(def)} ${C.dim("(the remembered one)")}`);
-}
-
 function cmdNew(name: string): void {
 	requireMigrated();
 	const err = nameError(name);
 	if (err) fail(err);
 	if (existsSync(profileDir(name))) fail(`profile "${name}" already exists`);
-	createProfile(name, readDefault());
+	createProfile(name, readCurrent());
 	say(`${C.green("✓")} created ${C.cyan(name)}`);
 	say();
 	say(`  ${C.bold(`ccp use ${name}`)} then ${C.bold("claude")} and ${C.bold("/login")}`);
@@ -342,16 +327,11 @@ function main(argv: string[]): void {
 			if (!name) fail("`ccp app` needs the profile the Desktop app is signed into", `existing: ${listNames().join(", ") || "none"}`);
 			return cmdApp(name);
 		}
-		case "-":
-			return cmdUseDefault();
 		case "new": {
 			const name = rest[0];
 			if (!name) fail("`ccp new` needs a name for the profile");
 			return cmdNew(name);
 		}
-		case "default":
-			if (rest[0]) fail("`ccp default <name>` is gone", `\`ccp use ${rest[0]}\` switches and remembers; \`ccp use default\` returns to the remembered one`);
-			return cmdUseDefault();
 		case "doctor":
 			return cmdDoctor();
 		case "relink":

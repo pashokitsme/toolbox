@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, r
 import { join } from "node:path";
 import {
 	CONFIG_LINK,
-	DEFAULT_FILE,
+	CURRENT_FILE,
 	DESKTOP_FILE,
 	GLOBAL_CONFIG,
 	GLOBAL_CONFIG_LINK,
@@ -19,7 +19,7 @@ import {
 	isPrivate,
 	profileDir,
 } from "./paths.ts";
-import { isLink, isMigrated, listNames, setDefault, unsharedEntries, wireShared } from "./profile.ts";
+import { isLink, isMigrated, listNames, setCurrent, unsharedEntries, wireShared } from "./profile.ts";
 import { appRunning, unshareSessionLists } from "./desktop.ts";
 import { C, emit, fail, say } from "./term.ts";
 
@@ -183,18 +183,18 @@ function plan(name: string): Step[] {
 			try {
 				symlinkSync(dir, CONFIG_LINK);
 				symlinkSync(join(dir, GLOBAL_CONFIG), GLOBAL_CONFIG_LINK);
-				setDefault(name);
+				setCurrent(name);
 			} catch (err) {
 				// A half-made step is not in `done`; leave nothing behind for the undo of the previous steps to trip on.
 				for (const link of [CONFIG_LINK, GLOBAL_CONFIG_LINK]) if (isLink(link)) unlinkSync(link);
-				rmSync(DEFAULT_FILE, { force: true });
+				rmSync(CURRENT_FILE, { force: true });
 				throw err;
 			}
 		},
 		undo: () => {
 			unlinkSync(CONFIG_LINK);
 			unlinkSync(GLOBAL_CONFIG_LINK);
-			rmSync(DEFAULT_FILE, { force: true });
+			rmSync(CURRENT_FILE, { force: true });
 		},
 	});
 
@@ -275,7 +275,7 @@ export function undoMigration(): void {
 	renameSync(dir, CONFIG_LINK);
 	for (const entry of readdirSync(SHARED_DIR)) renameSync(join(SHARED_DIR, entry), join(CONFIG_LINK, entry));
 	rmSync(join(CONFIG_LINK, SETTINGS_SNAPSHOT), { force: true });
-	rmSync(DEFAULT_FILE, { force: true });
+	rmSync(CURRENT_FILE, { force: true });
 	rmSync(DESKTOP_FILE, { force: true }); // the app's login stays where it is; only the record goes
 	rmdirIfEmpty(SHARED_DIR);
 	rmdirIfEmpty(PROFILES_DIR);
