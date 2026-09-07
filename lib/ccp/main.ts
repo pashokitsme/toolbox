@@ -44,11 +44,14 @@
 // not match any profile (the profile is not logged in on the CLI yet), say it
 // with `ccp app <name>`.
 //
-// The app also keeps its session list — the sidebar — per account. ccp folds
-// those into one list that every account shows, so a session started under
-// either profile is there under the other; `ccp relink` and `ccp use` do it
-// whenever the app is closed, for accounts added later too. Archive or delete a
-// session and it is gone for both.
+// The app also keeps its session list — the sidebar — per account. ccp copies
+// entries between those lists so every account shows every session; `ccp use`
+// does it with the app closed mid-switch, `ccp relink` whenever it is not
+// running, and accounts added later are picked up the same way. Delete a session
+// in one account and it goes from the others too. The lists have to stay real
+// directories — the app refuses symlinks under its own config root and then
+// silently stops loading and saving sessions — so this is a copy, not a link,
+// and the two lists are equal as of the last switch rather than continuously.
 //
 // Layout it maintains:
 //   ~/.claude-shared/            the one real config home
@@ -113,7 +116,7 @@ import {
 	syncConfig,
 	wireShared,
 } from "./profile.ts";
-import { appInstalled, appRunning, desktopChecks, hasSnapshot, liveProfile, profileForAppAccount, recordLive, shareSessionLists, switchApp, unsharedSessionLists } from "./desktop.ts";
+import { appInstalled, appRunning, desktopChecks, hasSnapshot, liveProfile, profileForAppAccount, recordLive, sessionSyncPending, switchApp, syncSessionLists } from "./desktop.ts";
 import { SHELL_INIT, emitUse } from "./shell.ts";
 import { C, emit, fail, say } from "./term.ts";
 
@@ -210,18 +213,19 @@ function cmdUse(name: string, app: boolean): void {
 	say(`${C.green("→")} ${C.cyan(name)}`);
 	if (app) {
 		reportApp(switchApp(name), name);
-		shareSessionListsIfClosed();
+		syncSessionListsIfClosed(); // switchApp does it too, unless it had nothing to switch
 	}
 }
 
-/** The sidebar list is per account in the app; fold it into one whenever the app is not around to mind. */
-function shareSessionListsIfClosed(): boolean {
-	if (!appInstalled() || !unsharedSessionLists().length) return true;
+/** The app keeps one session list per account; even them up whenever it is not running. */
+function syncSessionListsIfClosed(): boolean {
+	if (!appInstalled() || !sessionSyncPending()) return true;
 	if (appRunning()) {
-		say(`${C.yellow("!")} Desktop app: its session list is still per account — quit it and run \`ccp relink\``);
+		say(`${C.yellow("!")} Desktop app: its accounts hold different session lists — quit it and run \`ccp relink\``);
 		return false;
 	}
-	for (const l of shareSessionLists()) say(`  ${C.green("+")} Desktop app session list ${C.dim(l)} ${C.dim("-> shared")}`);
+	const n = syncSessionLists();
+	if (n) say(`  ${C.green("+")} Desktop app: ${n} session list ${n === 1 ? "entry" : "entries"} evened up`);
 	return true;
 }
 
@@ -235,7 +239,9 @@ function reportApp(result: ReturnType<typeof switchApp>, name: string): void {
 			say(C.dim("   say so with `ccp app <name>`, then `ccp use` again — or `ccp use --no-app` to keep it that way"));
 			return;
 		case "switched":
-			say(`${C.green("✓")} Desktop app: ${result.from} → ${C.cyan(name)}${result.relaunched ? C.dim("  (restarted)") : ""}`);
+			say(
+				`${C.green("✓")} Desktop app: ${result.from} → ${C.cyan(name)}${result.relaunched ? C.dim("  (restarted)") : ""}${result.synced ? C.dim(`, ${result.synced} session entries evened up`) : ""}`,
+			);
 			return;
 		case "fresh":
 			say(`${C.green("✓")} Desktop app: ${result.from}'s login set aside${result.relaunched ? ", restarted" : ""} — it is signed out now`);
@@ -297,7 +303,7 @@ function cmdRelink(): void {
 	}
 	for (const name of names) problems.push(...wireShared(profileDir(name)));
 	for (const p of problems) say(`${C.yellow("!")} ${p}`);
-	if (!shareSessionListsIfClosed()) problems.push("app session list");
+	if (!syncSessionListsIfClosed()) problems.push("app session lists");
 	say(`${C.green("✓")} shared links refreshed${problems.length ? C.yellow(` (${problems.length} left for you)`) : ""}`);
 	if (problems.length) process.exit(1);
 }

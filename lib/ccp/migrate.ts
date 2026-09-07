@@ -20,7 +20,6 @@ import {
 	profileDir,
 } from "./paths.ts";
 import { isLink, isMigrated, listNames, setCurrent, unsharedEntries, wireShared } from "./profile.ts";
-import { appRunning, unshareSessionLists } from "./desktop.ts";
 import { C, emit, fail, say } from "./term.ts";
 
 type Step = { describe: string; run: () => void; undo: () => void };
@@ -264,9 +263,6 @@ export function undoMigration(): void {
 	if (unshared.length)
 		fail(`${name} holds ${unshared.join(", ")} outside the shared home`, "run `ccp relink` first, so nothing is overwritten");
 	refuseIfInUse(CONFIG_LINK);
-	if (appRunning()) fail("the Claude Desktop app is running", "quit it first: its session list has to be handed back to each account");
-
-	unshareSessionLists();
 	unlinkSync(CONFIG_LINK);
 	unlinkSync(GLOBAL_CONFIG_LINK);
 	for (const entry of readdirSync(dir)) if (!isPrivate(entry) && isLink(join(dir, entry))) unlinkSync(join(dir, entry));

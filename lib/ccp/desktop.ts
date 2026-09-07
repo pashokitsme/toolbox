@@ -22,20 +22,26 @@
 // one directory of entries under claude-code-sessions/<account>/<organization>/,
 // each entry naming a transcript in the shared history. The transcripts are
 // already common to both profiles; the lists are not, so the same session shows
-// up in one account and not the other. ccp makes every such directory a symlink
-// to one shared list. Archiving or deleting a session then does it for both
-// accounts, which is what "the same sessions everywhere" means. An entry also
-// carries the MCP configuration of the account that created it; opened under
-// the other account that part is stale, and the app is left to cope.
+// up in one account and not the other. ccp copies the entries so that every list
+// holds all of them, and does it while the app is closed, at every switch.
+//
+// Copying rather than one shared directory behind symlinks: the app refuses to
+// read or write through a symlink inside its own directory — "components under
+// the config root may not be symlinks" — and goes quiet about it, loading no
+// sessions at all and persisting none. Only the whole config root may be moved.
+// So the lists stay real directories that ccp keeps equal. A deletion wins over
+// a copy, so removing a session in one account removes it everywhere; entries
+// carry the MCP configuration of the account that made them, and under the other
+// account that part is stale and the app is left to cope.
 //
 // The app must not be running while its files move — it holds them open and
 // writes on quit. "Running" is decided by a helper process carrying
 // `--user-data-dir=<that directory>`, so a test against another HOME never sees
 // the real app, and never quits it.
 
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_SESSIONS_SHARED, DESKTOP_FILE, HOME, profileDir } from "./paths.ts";
+import { DESKTOP_FILE, HOME, profileDir } from "./paths.ts";
 import { type Check, listNames, readAccount } from "./profile.ts";
 
 export const APP_DIR = join(HOME, "Library", "Application Support", "Claude");
@@ -129,8 +135,8 @@ export type AppSwitch =
 	| { kind: "no-app" } // not installed here
 	| { kind: "same" } // already on that profile
 	| { kind: "unknown" } // whose login is live cannot be told; nothing moved
-	| { kind: "switched"; from: string; relaunched: boolean }
-	| { kind: "fresh"; from: string; relaunched: boolean }; // target had no snapshot: app starts signed out
+	| { kind: "switched"; from: string; relaunched: boolean; synced: number }
+	| { kind: "fresh"; from: string; relaunched: boolean; synced: number }; // target had no snapshot: app starts signed out
 
 /**
  * Put the app on `target`. Quits it if it is running, and starts it again after.
@@ -162,8 +168,113 @@ export function switchApp(target: string): AppSwitch {
 		}
 	}
 	recordLive(target);
+	const synced = syncSessionLists(); // with the app down, this is the moment the lists can move
 	if (running) launchApp();
-	return fresh ? { kind: "fresh", from, relaunched: running } : { kind: "switched", from, relaunched: running };
+	return fresh ? { kind: "fresh", from, relaunched: running, synced } : { kind: "switched", from, relaunched: running, synced };
+}
+
+const APP_SESSIONS = join(APP_DIR, "claude-code-sessions");
+
+function isDir(p: string): boolean {
+	try {
+		return lstatSync(p).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/** Every <account>/<organization> list the app keeps. */
+function sessionLists(): string[] {
+	if (!existsSync(APP_SESSIONS)) return [];
+	const out: string[] = [];
+	for (const account of readdirSync(APP_SESSIONS)) {
+		const dir = join(APP_SESSIONS, account);
+		if (!isDir(dir)) continue;
+		for (const org of readdirSync(dir)) {
+			const list = join(dir, org);
+			if (isDir(list)) out.push(list);
+		}
+	}
+	return out;
+}
+
+const ENTRY = /^local_.+\.json$/;
+const MARKER = /^deleted_/;
+
+type SessionSync = { copy: { from: string; to: string }[]; remove: string[] };
+
+/**
+ * What it would take for every list to hold the same sessions: the newest copy
+ * of each entry everywhere, every deletion marker everywhere, and no entry that
+ * some account has deleted.
+ */
+function planSessionSync(): SessionSync {
+	const lists = sessionLists();
+	if (lists.length < 2) return { copy: [], remove: [] };
+
+	const newest = new Map<string, { path: string; mtime: number }>();
+	const markers = new Map<string, string>();
+	const deleted = new Set<string>();
+	const present = new Map<string, Set<string>>();
+
+	for (const list of lists) {
+		for (const name of readdirSync(list)) {
+			const path = join(list, name);
+			if (MARKER.test(name)) {
+				deleted.add(name.slice("deleted_".length));
+				if (!markers.has(name)) markers.set(name, path);
+			} else if (!ENTRY.test(name)) {
+				continue; // whatever else the app keeps there stays with its account
+			} else {
+				const mtime = statSync(path).mtimeMs;
+				const best = newest.get(name);
+				if (!best || mtime > best.mtime) newest.set(name, { path, mtime });
+			}
+			present.set(name, (present.get(name) ?? new Set()).add(list));
+		}
+	}
+
+	const plan: SessionSync = { copy: [], remove: [] };
+	for (const [name, best] of newest) {
+		const id = name.slice("local_".length, -".json".length);
+		if (deleted.has(id)) {
+			for (const list of present.get(name) ?? []) plan.remove.push(join(list, name));
+			continue;
+		}
+		for (const list of lists) {
+			const here = join(list, name);
+			if (here === best.path) continue;
+			if (existsSync(here) && statSync(here).mtimeMs >= best.mtime) continue;
+			plan.copy.push({ from: best.path, to: here });
+		}
+	}
+	for (const [name, from] of markers)
+		for (const list of lists) {
+			const here = join(list, name);
+			if (!existsSync(here)) plan.copy.push({ from, to: here });
+		}
+	return plan;
+}
+
+/** How many files are out of step between the lists. */
+export function sessionSyncPending(): number {
+	const plan = planSessionSync();
+	return plan.copy.length + plan.remove.length;
+}
+
+/** Make every list hold the same sessions. Only with the app closed. */
+export function syncSessionLists(): number {
+	const plan = planSessionSync();
+	for (const path of plan.remove) rmSync(path, { force: true });
+	for (const { from, to } of plan.copy) {
+		copyFileSync(from, to);
+		const src = statSync(from);
+		// The mtime is what "which copy is newer" means here, so it has to survive
+		// exactly: passing Dates truncates to whole milliseconds and the copy then
+		// reads as older than its source for good, syncing the same file every time.
+		utimesSync(to, src.atimeMs / 1000, src.mtimeMs / 1000);
+	}
+	return plan.copy.length + plan.remove.length;
 }
 
 export function desktopChecks(): Check[] {
@@ -185,7 +296,7 @@ export function desktopChecks(): Check[] {
 			},
 		];
 	const on = recorded ?? detected;
-	const unshared = unsharedSessionLists();
+	const pending = sessionSyncPending();
 	return [
 		{
 			ok: on !== undefined,
@@ -193,89 +304,10 @@ export function desktopChecks(): Check[] {
 			detail: on ?? "unknown — `ccp app <name>`",
 		},
 		{
-			ok: unshared.length === 0,
-			label: "Desktop app: one session list for every account",
-			detail: unshared.length
-				? `${unshared.length} kept apart — quit the app and run \`ccp relink\``
-				: existsSync(APP_SESSIONS_SHARED)
-					? undefined
-					: "no lists yet",
+			ok: pending === 0,
+			label: "Desktop app: every account sees every session",
+			detail: pending ? `${pending} entries out of step — quit the app and run \`ccp relink\`` : undefined,
 		},
 	];
 }
 
-const APP_SESSIONS = join(APP_DIR, "claude-code-sessions");
-
-/** Every <account>/<organization> list the app has, link or real. */
-function sessionLists(): string[] {
-	if (!existsSync(APP_SESSIONS)) return [];
-	const out: string[] = [];
-	for (const account of readdirSync(APP_SESSIONS)) {
-		const dir = join(APP_SESSIONS, account);
-		if (!isDir(dir)) continue;
-		for (const org of readdirSync(dir)) {
-			const list = join(dir, org);
-			if (isDir(list) || isLinkTo(list, APP_SESSIONS_SHARED)) out.push(list);
-		}
-	}
-	return out;
-}
-
-function isDir(p: string): boolean {
-	try {
-		return lstatSync(p).isDirectory();
-	} catch {
-		return false;
-	}
-}
-
-function isLinkTo(p: string, target: string): boolean {
-	try {
-		return lstatSync(p).isSymbolicLink() && statSync(p).isDirectory() && statSync(p).ino === statSync(target).ino;
-	} catch {
-		return false;
-	}
-}
-
-/** Session lists the app keeps for itself, i.e. not yet links to the shared one. */
-export function unsharedSessionLists(): string[] {
-	return sessionLists().filter((l) => !isLinkTo(l, APP_SESSIONS_SHARED));
-}
-
-/**
- * Fold every real session list into the shared one and leave a link behind.
- * Two entries with the same name keep the newer. Only with the app closed.
- */
-export function shareSessionLists(): string[] {
-	const lists = unsharedSessionLists();
-	if (!lists.length) return [];
-	mkdirSync(APP_SESSIONS_SHARED, { recursive: true, mode: 0o700 });
-	for (const list of lists) {
-		for (const entry of readdirSync(list)) {
-			const from = join(list, entry);
-			const to = join(APP_SESSIONS_SHARED, entry);
-			if (existsSync(to)) {
-				if (statSync(to).mtimeMs >= statSync(from).mtimeMs) {
-					rmSync(from, { recursive: true, force: true });
-					continue;
-				}
-				rmSync(to, { recursive: true, force: true });
-			}
-			renameSync(from, to);
-		}
-		rmdirSync(list);
-		symlinkSync(APP_SESSIONS_SHARED, list);
-	}
-	return lists.map((l) => l.slice(APP_SESSIONS.length + 1));
-}
-
-/** Give every account its own copy of the shared list back. Only with the app closed. */
-export function unshareSessionLists(): void {
-	for (const list of sessionLists()) {
-		if (!isLinkTo(list, APP_SESSIONS_SHARED)) continue;
-		unlinkSync(list);
-		mkdirSync(list, { mode: 0o700 });
-		if (existsSync(APP_SESSIONS_SHARED)) cpSync(APP_SESSIONS_SHARED, list, { recursive: true });
-	}
-	rmSync(APP_SESSIONS_SHARED, { recursive: true, force: true });
-}

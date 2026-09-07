@@ -32,8 +32,6 @@ export const SHARED_DIR = join(HOME, ".claude-shared");
 export const CURRENT_FILE = join(PROFILES_DIR, ".current");
 /** Name of the profile whose Desktop-app login is the live one (see desktop.ts). */
 export const DESKTOP_FILE = join(PROFILES_DIR, ".desktop");
-/** The Desktop app's session list, shared between accounts (see desktop.ts). */
-export const APP_SESSIONS_SHARED = join(PROFILES_DIR, ".app-sessions");
 
 /** The two symlinks `ccp use` retargets. */
 export const CONFIG_LINK = join(HOME, ".claude");
