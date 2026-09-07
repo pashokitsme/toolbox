@@ -304,9 +304,15 @@ export function desktopChecks(): Check[] {
 			detail: on ?? "unknown — `ccp app <name>`",
 		},
 		{
-			ok: pending === 0,
+			// While the app runs it writes to its own account's list only, so drift
+			// here is the normal state, not a fault: the next switch evens it up.
+			ok: pending === 0 || appRunning(),
 			label: "Desktop app: every account sees every session",
-			detail: pending ? `${pending} entries out of step — quit the app and run \`ccp relink\`` : undefined,
+			detail: !pending
+				? undefined
+				: appRunning()
+					? `${pending} entries the running app has moved on; the next \`ccp use\` evens them up`
+					: `${pending} entries out of step — run \`ccp relink\``,
 		},
 	];
 }
