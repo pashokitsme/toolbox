@@ -1,9 +1,16 @@
 ---
 name: obscura
-description: Use when reading a web page, scraping a site, driving a page that needs clicking, form-filling or a login, checking a local dev server's rendered output, console or network traffic, or deciding between obscura, WebFetch, WebSearch and Playwright for a web task.
+description: Use before fetching any URL — `ofetch`, a CLI on PATH, is the default reader and replaces WebFetch — and when scraping a site, driving a page that needs clicking, form-filling or a login, checking a local dev server's rendered output, console or network traffic, or choosing between ofetch, the obscura MCP, WebFetch, WebSearch and Playwright.
 ---
 
 # obscura
+
+**The default way to read a URL is `ofetch <url>` through Bash.** It is a plain
+script on `PATH` — no MCP registration, no session setup — so it is available
+from a subagent, from a fresh session, and anywhere the `browser_*` tools are
+not loaded. It renders the page, files it, and prints a preview, which is the
+whole point: the page does not land in context. `WebFetch` is a fallback for
+one case (a cheap summary of a huge page), not the first reach.
 
 A headless browser (Rust) that renders pages and runs their JavaScript. It
 replaces `WebFetch` for reading the web, because `WebFetch` retrieves HTML over
@@ -56,6 +63,16 @@ obscura itself could not fetch.
 `ofetch -d markdown` can still be fully present under `browser_navigate` with
 `waitUntil: networkidle0`. Do not conclude "obscura cannot render this" from a
 thin `ofetch` dump alone — re-check in a tab first.
+
+## An HTTP error is the site, not the entry point
+
+`ofetch`, `obscura scrape` and the `browser_*` MCP tools all drive the same
+engine over the same transport, so a 403, a 429 or a challenge page from one of
+them is the same answer from all three. Re-running the fetch through a different
+entry point after a rate limit changes nothing except how much context it costs.
+Back off, wait, or take the refusal as the answer — see *Scraping manners*. The
+entry points differ in **state and output shape**, not in what a site is willing
+to serve.
 
 ## Four places the obscura docs are wrong
 
@@ -245,8 +262,13 @@ the doc/binary discrepancies instead.
 
 ## Common mistakes
 
+- Reaching for `WebFetch` by reflex. The default reader for a URL is `ofetch`;
+  `WebFetch` sees an un-executed HTML shell and drops the result into context
+  whole.
 - Dumping a rendered page straight into context instead of letting `ofetch`
   file it and grepping the file.
+- Re-trying a 429 or a 403 through another entry point. Same engine, same
+  answer — see above.
 - Using `--selector` expecting a filtered result (see above).
 - Trying `localhost` without `--local` and reading the SSRF refusal as the dev
   server being down.
