@@ -43,6 +43,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSy
 import { join } from "node:path";
 import { DESKTOP_FILE, HOME, profileDir } from "./paths.ts";
 import { type Check, listNames, readAccount } from "./profile.ts";
+import { tokenPlan } from "./usage.ts";
 
 export const APP_DIR = join(HOME, "Library", "Application Support", "Claude");
 const APP_NAME = "Claude";
@@ -76,7 +77,15 @@ export function appAccountUuid(): string | undefined {
 export function profileForAppAccount(): string | undefined {
 	const uuid = appAccountUuid();
 	if (!uuid) return undefined;
-	return listNames().find((n) => readAccount(n)?.uuid === uuid);
+	return listNames().find((n) => {
+		const account = readAccount(n);
+		if (account?.uuid !== uuid) return false;
+		// A config whose plan the profile's own token contradicts names somebody else's account (see
+		// usage.ts) — often the app's own, written there by its sessions; matching on it would tie the
+		// app to the wrong profile.
+		const plan = tokenPlan(n);
+		return !plan || plan === account.plan;
+	});
 }
 
 /** Whose files are live in the app directory: the record first, the app's own account otherwise. */

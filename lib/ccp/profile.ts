@@ -29,13 +29,25 @@ import {
 	profileConfig,
 	profileDir,
 } from "./paths.ts";
+import { planName, tokenPlan } from "./usage.ts";
 
 // Keys of .claude.json that belong to one account. Every other key — MCP
 // servers, per-project trust and permissions, onboarding flags — is a setting
 // the user expects to be the same whichever account is in use, so `syncConfig`
-// carries those between profiles and `createProfile` seeds them.
+// carries those between profiles and `createProfile` seeds them. The core of
+// this list is what Claude Code itself clears on /logout; a key missing from it
+// travels to the other profile, which is how one account's usage cache ended up
+// under the other.
 const ACCOUNT_SCOPED_KEYS = new Set([
 	"oauthAccount",
+	"cachedUsageUtilization",
+	"cachedArtifactRoster",
+	"clientDataCache",
+	"autoCompactWindowsCache",
+	"githubWebConnectionStatusCache",
+	"startupPrefetchedAt",
+	"additionalModelOptionsAnsweredAt",
+	"lastSeenOrgDefaultUpdatedAt",
 	"userID",
 	"anonymousId",
 	"hasAvailableSubscription",
@@ -127,10 +139,7 @@ export function readAccount(name: string): Account | undefined {
 }
 
 function planLabel(oauth: Json): string {
-	const type = String(oauth.organizationType ?? "");
-	const base = type === "claude_max" ? "Max" : type === "claude_pro" ? "Pro" : type || "?";
-	const mult = /max_(\d+)x/.exec(String(oauth.organizationRateLimitTier ?? ""))?.[1];
-	return mult ? `${base} ${mult}x` : base;
+	return planName(String(oauth.organizationType ?? ""), String(oauth.organizationRateLimitTier ?? ""));
 }
 
 /** The profile the machine is on: what the links point at and new shells pick up. */
@@ -401,8 +410,26 @@ export function doctor(): Check[] {
 			checks.push({ ok: false, label: `${name}: logged in`, detail: `run \`ccp use ${name}\` then \`/login\`` });
 	}
 
-	for (const d of duplicateAccounts())
+	// .claude.json can name another account than the profile's token (see
+	// usage.ts). The token's plan is readable offline, so a file whose plan the
+	// token contradicts is reported as stale — and is not taken as evidence that
+	// two profiles share a login.
+	const stale = new Set<string>();
+	for (const name of listNames()) {
+		const file = readAccount(name);
+		const token = tokenPlan(name);
+		if (!file || !token || file.plan === token) continue;
+		stale.add(name);
 		checks.push({
+			ok: false,
+			label: `${name}: config names ${file.email} (${file.plan}), but the token is for a ${token} plan`,
+			detail: "the config is stale — /login there rewrites it; `ccp ls` shows the token's own account",
+		});
+	}
+
+	for (const d of duplicateAccounts())
+		if (!d.names.some((n) => stale.has(n)))
+			checks.push({
 			ok: false,
 			label: `${d.names.join(" and ")} are both logged in as ${d.email}`,
 			detail: "a /login landed in the wrong profile: sign into the right account at claude.ai, then /login again there",

@@ -4,7 +4,7 @@
 //
 // Usage:
 //   ccp                     list profiles (same as `ccp ls`)
-//   ccp ls                  list profiles: account, plan, which one is current
+//   ccp ls                  list profiles: account, plan, limits, which one is current
 //   ccp <name>              switch to a profile: this shell now, and every new
 //                           shell and no-variable context from here on
 //   ccp use <name>          the same, and never ambiguous with a subcommand
@@ -39,7 +39,10 @@
 // its own copy under <profile>/desktop/, and `ccp use` quits the app, swaps the
 // copies, and starts it again — so a running app closes, sessions included. A
 // profile whose copy does not exist yet gets the app signed out; sign in there
-// once and it is kept from then on. `--no-app` skips all of this. Which profile
+// once and it is kept from then on. `--no-app` skips all of this — at a cost:
+// the app's sessions use the current profile's config with the app's own
+// credentials, and once a day record the app's account there, so a profile
+// left current under an app on another account soon names that account. Which profile
 // the app is on is read from the app's own record of its account; if that does
 // not match any profile (the profile is not logged in on the CLI yet), say it
 // with `ccp app <name>`.
@@ -96,8 +99,18 @@
 // CLI it spawns — its sessions land in the shared history like everyone else's,
 // but the account is the app's own, changed by logging out and in there.
 //
-// ccp never reads or moves a token. `ccp new` gets you as far as an empty profile;
-// logging it in is `/login`, done by you.
+// Limits: `ccp ls` shows every logged-in profile's plan windows — the 5-hour one
+// and the weekly ones — as percent used and left, with the reset time both as a
+// date and as a countdown; `ccp use` shows them for the profile it switched to.
+// They come live from the same endpoint Claude Code's /usage reads, which takes
+// the profile's OAuth access token, so ccp reads that token from the Keychain for
+// the one request: never printed, stored, refreshed or sent anywhere but
+// api.anthropic.com. An expired token is not refreshed — that rotates the
+// refresh token, which is Claude Code's to do — and the numbers then come from
+// Claude Code's own cached copy, labelled with its age.
+//
+// ccp never writes or moves a token. `ccp new` gets you as far as an empty
+// profile; logging it in is `/login`, done by you.
 
 import { existsSync } from "node:fs";
 import { migrate, undoMigration } from "./migrate.ts";
@@ -107,10 +120,10 @@ import {
 	adoptUnshared,
 	createProfile,
 	doctor,
-	duplicateAccounts,
 	isMigrated,
 	list,
 	listNames,
+	readAccount,
 	readCurrent,
 	setCurrent,
 	syncConfig,
@@ -119,11 +132,12 @@ import {
 import { appInstalled, appRunning, desktopChecks, hasSnapshot, liveProfile, profileForAppAccount, recordLive, sessionSyncPending, switchApp, syncSessionLists } from "./desktop.ts";
 import { SHELL_INIT, emitUse } from "./shell.ts";
 import { C, emit, fail, say } from "./term.ts";
+import { accountNotes, formatUsage, inspect, trustedAccount } from "./usage.ts";
 
 const HELP = `${C.bold("ccp")} — Claude Code account profiles
 
   ${C.cyan("ccp")}                  list profiles
-  ${C.cyan("ccp ls")}               list profiles: account, plan, which one is current
+  ${C.cyan("ccp ls")}               list profiles: account, plan, limits, which one is current
   ${C.cyan("ccp <name>")}           switch to a profile — this shell, new shells, everything
   ${C.cyan("ccp use <name>")}       the same, unambiguous with subcommands
   ${C.cyan("ccp use --no-app <name>")}  switch the command line only, leave the Desktop app alone
@@ -160,33 +174,50 @@ function requireProfile(name: string): void {
 /** What every switch does first: pick up new shared entries, carry settings over. */
 function refresh(name: string): void {
 	for (const p of wireShared(profileDir(name))) say(`${C.yellow("!")} ${p}`);
-	const from = syncConfig(name);
-	if (from.length) say(C.dim(`   settings carried over from ${from.join(", ")}`));
+	syncConfig(name);
 }
 
-function warnDuplicates(): void {
-	for (const d of duplicateAccounts()) {
+/** Profiles on one account, judged by what each one's token says where it could say anything. */
+function warnDuplicates(accounts: { name: string; email?: string }[]): void {
+	const byEmail = new Map<string, string[]>();
+	for (const a of accounts) if (a.email) byEmail.set(a.email, [...(byEmail.get(a.email) ?? []), a.name]);
+	for (const [email, names] of byEmail) {
+		if (names.length < 2) continue;
 		say();
-		say(`${C.yellow("!")} ${d.names.join(" and ")} are both logged in as ${d.email}`);
+		say(`${C.yellow("!")} ${names.join(" and ")} are both logged in as ${email}`);
 		say(C.dim("   a /login landed in the wrong profile: sign into the right account at claude.ai, then /login again there"));
 	}
 }
 
-function cmdList(): void {
+async function cmdList(): Promise<void> {
 	requireMigrated();
 	const profiles = list();
 	if (!profiles.length) {
 		say(C.dim("no profiles"));
 		return;
 	}
+	// Every profile at once: a slow answer costs its own timeout, not the sum of them.
+	const views = await Promise.all(profiles.map((p) => inspect(p.name, p.account?.uuid)));
 	const width = Math.max(...profiles.map((p) => p.name.length));
-	for (const p of profiles) {
+	const indent = " ".repeat(width + 5);
+	profiles.forEach((p, i) => {
+		const view = views[i];
+		// Only an account ccp can vouch for goes in the column: a config the token contradicts is not one.
+		const shown = trustedAccount(p.account, view);
+		const loggedIn = !!(shown || p.account || view?.tokenPlan);
 		const mark = p.isActive ? C.green("*") : " ";
 		const name = p.isCurrent ? C.bold(p.name.padEnd(width)) : p.name.padEnd(width);
-		const account = p.account ? `${p.account.email}  ${C.dim(p.account.plan)}` : C.yellow("not logged in");
+		const account = shown
+			? `${shown.email}  ${C.dim(shown.plan)}`
+			: loggedIn
+				? `${C.yellow("account unknown")}${view?.tokenPlan ? `  ${C.dim(view.tokenPlan)}` : ""}`
+				: C.yellow("not logged in");
 		const tag = p.isCurrent ? C.dim("  (current)") : "";
 		say(` ${mark} ${name}  ${account}${tag}`);
-	}
+		if (!view) return;
+		for (const note of accountNotes(p.account, view)) say(`${indent}${note}`);
+		if (loggedIn) for (const line of formatUsage(view.usage)) say(`${indent}${line}`);
+	});
 	const active = activeName();
 	if (active && active !== readCurrent()) say(C.dim(`\n   this shell is still on ${active}; \`ccp use ${readCurrent()}\` brings it over`));
 	if (process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR !== undefined)
@@ -199,21 +230,46 @@ function cmdList(): void {
 				`\n   Desktop app: ${on ? `on ${on}` : "on an account no profile has — `ccp app <name>`"}${kept.length ? `; login kept for ${kept.join(", ")}` : ""}${appRunning() ? "" : " (not running)"}`,
 			),
 		);
+		// The app's sessions run on the app's credentials but with ~/.claude.json, i.e. the current
+		// profile's config, and rewrite the account recorded there once a day. Out of step, that
+		// is how a profile ends up naming the other account.
+		const current = readCurrent();
+		if (on && current && on !== current)
+			say(
+				C.yellow(
+					`   the app is on ${on} while ${current} is current — its sessions record ${on}'s account in ${current}'s config; \`ccp use ${current}\` brings the app in step`,
+				),
+			);
 	}
-	warnDuplicates();
+	warnDuplicates(profiles.map((p, i) => ({ name: p.name, email: trustedAccount(p.account, views[i])?.email })));
 }
 
 /** Switch to a profile: this shell now, and the machine-wide current for everything else. */
-function cmdUse(name: string, app: boolean): void {
+async function cmdUse(name: string, app: boolean): Promise<void> {
 	requireMigrated();
 	requireProfile(name);
 	refresh(name);
 	setCurrent(name);
 	emitUse(name);
-	say(`${C.green("→")} ${C.cyan(name)}`);
+	const file = readAccount(name);
+	const view = await inspect(name, file?.uuid);
+	const shown = trustedAccount(file, view);
+	const loggedIn = !!(shown || file || view.tokenPlan);
+	const who = shown
+		? `  ${shown.email}  ${C.dim(shown.plan)}`
+		: loggedIn
+			? `  ${C.yellow("account unknown")}${view.tokenPlan ? `  ${C.dim(view.tokenPlan)}` : ""}`
+			: "";
+	say(`${C.green("→")} ${C.cyan(name)}${who}`);
+	for (const note of accountNotes(file, view)) say(`   ${note}`);
+	if (loggedIn) for (const line of formatUsage(view.usage)) say(`   ${line}`);
 	if (app) {
 		reportApp(switchApp(name), name);
 		syncSessionListsIfClosed(); // switchApp does it too, unless it had nothing to switch
+	} else if (appInstalled()) {
+		const on = liveProfile();
+		if (on && on !== name)
+			say(C.yellow(`   the Desktop app stays on ${on} — its sessions will record ${on}'s account in ${name}'s config`));
 	}
 }
 
@@ -308,7 +364,7 @@ function cmdRelink(): void {
 	if (problems.length) process.exit(1);
 }
 
-function main(argv: string[]): void {
+async function main(argv: string[]): Promise<void> {
 	const [cmd, ...rest] = argv;
 
 	switch (cmd) {
@@ -362,4 +418,4 @@ function main(argv: string[]): void {
 	}
 }
 
-main(process.argv.slice(2));
+await main(process.argv.slice(2));
