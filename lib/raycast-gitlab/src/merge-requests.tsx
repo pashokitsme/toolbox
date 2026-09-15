@@ -4,16 +4,13 @@
 import {
 	Action,
 	ActionPanel,
-	Clipboard,
 	Color,
 	getPreferenceValues,
 	Icon,
 	List,
-	showHUD,
 } from "@raycast/api";
 import { useCachedPromise, useCachedState } from "@raycast/utils";
 import { useState } from "react";
-import { markdownLink, richLink } from "./copy";
 import {
 	decodePeople,
 	DEFAULT_FILTERS,
@@ -31,6 +28,7 @@ import {
 import type { Host } from "./glab-config";
 import { AuthError } from "./gitlab";
 import { avatar, pipelineAccessory, ROLE_TITLE, STATE_ICON } from "./icons";
+import { CopyLinkAction, CopyMarkdownAction } from "./link-actions";
 import { absolutizeMarkdown } from "./markdown";
 import { MemberPicker } from "./member-picker";
 import { collectMatching } from "./paging";
@@ -340,20 +338,11 @@ export function MergeRequests(props: { host: Host; project: Project }) {
 										url={mr.webUrl}
 										shortcut={{ modifiers: ["shift"], key: "return" }}
 									/>
-									<Action
-										title="Copy Link"
-										icon={Icon.Link}
+									<CopyLinkAction
+										mr={mr}
 										shortcut={{ modifiers: ["cmd"], key: "c" }}
-										onAction={async () => {
-											await Clipboard.copy(richLink(mr.title, mr.webUrl));
-											await showHUD(`Copied !${mr.iid}`);
-										}}
 									/>
-									<Action.CopyToClipboard
-										title="Copy as Markdown"
-										content={markdownLink(mr.title, mr.webUrl)}
-										shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-									/>
+									<CopyMarkdownAction mr={mr} />
 								</ActionPanel.Section>
 								<ActionPanel.Section>
 									{searchFurther}

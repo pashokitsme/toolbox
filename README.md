@@ -48,19 +48,19 @@ so Claude picks it up in every project.
 
 ## Raycast
 
-`raycast/` holds Raycast script commands. `install.sh` leaves them alone — add
-the directory once in Raycast under Settings → Script Commands → Add Script
-Directory, and every script in it becomes a command.
-
 | | |
 |---|---|
-| `GitLab: MR Name` | `glmr -y` for a merge request link: copies it as a link titled with the merge request's name. |
-| `GitLab: Show MRs` | Merge requests of a project: projects in the order you last opened them, filters by people, state, draft and pipeline, details in a side panel, ⌘C for a titled link. An extension rather than a script, see below. |
+| `GitLab: MR Name` | A script command in `raycast/`: a merge request link in, the same link titled with the merge request's name out, on the clipboard — `glmr -y` from Raycast. |
+| `GitLab: Show MRs` | An extension in `lib/raycast-gitlab`: merge requests of a project, projects in the order you last opened them, filters by people, state, draft and pipeline, details in a side panel, ⌘C for a titled link. A merge request link pasted into its search turns into that merge request. |
 
-`GitLab: Show MRs` lives in `lib/raycast-gitlab`. It reads hosts and tokens from
-glab's own config, so a host shows up once `glab auth login --hostname <host>`
-has saved a token for it (a token kept in the keychain is not seen). To put it
-into Raycast:
+`install.sh` leaves Raycast alone. For `GitLab: MR Name`, add `raycast/` once
+under Settings → Extensions → Script Commands → Add Script Directory; to have it
+take a link pasted straight into the root search, run Manage Fallback Commands
+and enable it there.
+
+`GitLab: Show MRs` reads hosts and tokens from glab's own config, so a host
+shows up once `glab auth login --hostname <host>` has saved a token for it (a
+token kept in the keychain is not seen). To put the extension into Raycast:
 
 ```sh
 cd lib/raycast-gitlab
@@ -68,7 +68,7 @@ bun install        # ./install.sh does this too
 bun run dev        # imports the extension; it stays after ⌃C
 ```
 
-| Keys | |
+| Keys in Show MRs | |
 |---|---|
 | ↵ | details of the merge request in a side panel |
 | ⌘C / ⌘⇧C | copy a link titled with the merge request's name / the same as markdown |

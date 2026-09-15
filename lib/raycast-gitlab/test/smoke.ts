@@ -9,6 +9,7 @@ import {
 	fetchCurrentUsername,
 	fetchFrecentProjects,
 	fetchMembers,
+	fetchMergeRequest,
 	fetchMergeRequestDetail,
 	fetchMergeRequests,
 	fetchProjects,
@@ -103,4 +104,10 @@ console.log(
 	(await fetchMembers(host, fullPath, memberSearch, null)).items.map(
 		(p) => p.username,
 	),
+);
+
+const byLink = await fetchMergeRequest(host, fullPath, first.iid);
+console.log(
+	"by link:",
+	byLink.title === first.title && byLink.webUrl === first.webUrl ? "same as the list" : "DIFFERS from the list",
 );

@@ -1,6 +1,7 @@
 // GitLab: Show MRs — pick a project, then its merge requests. Projects come in
 // the order you last opened them here, then GitLab's own frecent ones, then
-// the rest by activity.
+// the rest by activity. A merge request link pasted into the search turns
+// into that merge request, ready to copy as a link titled with its name.
 
 import {
 	Action,
@@ -22,8 +23,18 @@ import { useEffect, useRef, useState } from "react";
 import { projectAvatarFile } from "./avatars";
 import { loadHosts, type Host } from "./glab-config";
 import { AuthError } from "./gitlab";
+import { STATE_ICON } from "./icons";
+import { CopyLinkAction, CopyMarkdownAction } from "./link-actions";
 import { MergeRequests } from "./merge-requests";
-import { fetchFrecentProjects, fetchProjects, MIN_SEARCH } from "./queries";
+import { type MergeRequestLink, parseMergeRequestLink } from "./mr-link";
+import {
+	fetchFrecentProjects,
+	fetchMergeRequest,
+	fetchProjects,
+	MIN_SEARCH,
+	type MergeRequest,
+	type Project,
+} from "./queries";
 import {
 	orderProjects,
 	parseHistory,
@@ -32,6 +43,7 @@ import {
 	removeRecent,
 	type RecentProject,
 } from "./recent";
+import { rowTitle } from "./title";
 
 export default function Command() {
 	// not useCachedPromise: a Host carries its token, and Raycast's cache is a plain file
@@ -94,8 +106,19 @@ function ProjectPicker(props: {
 		[host.host],
 	);
 
+	const link = parseMergeRequestLink(searchText, props.hosts);
+	const known = link?.kind === "known" ? link : null;
+	const linked = useCachedPromise(
+		(_host: string, fullPath: string, iid: string) =>
+			// execute is off without a link, so known is there when this runs
+			fetchMergeRequest(known?.host ?? host, fullPath, iid),
+		[known?.host.host ?? "", known?.fullPath ?? "", known?.iid ?? ""],
+		{ execute: Boolean(known) },
+	);
+
 	const trimmed = searchText.trim();
-	const serverSearch = trimmed.length >= MIN_SEARCH ? trimmed : "";
+	// a pasted link is not a project name to look for
+	const serverSearch = !link && trimmed.length >= MIN_SEARCH ? trimmed : "";
 	const server = useCachedPromise(
 		(_host: string, search: string) =>
 			async ({ cursor }: { cursor?: string | null }) => {
@@ -107,12 +130,14 @@ function ProjectPicker(props: {
 		[host.host, serverSearch],
 	);
 
-	const listed = orderProjects({
-		history,
-		frecent: frecent.data ?? [],
-		server: server.data ?? [],
-		searchText,
-	});
+	const listed = link
+		? []
+		: orderProjects({
+				history,
+				frecent: frecent.data ?? [],
+				server: server.data ?? [],
+				searchText,
+			});
 	const avatarFiles = useAvatarFiles(
 		host,
 		listed.map((entry) => entry.project),
@@ -123,8 +148,10 @@ function ProjectPicker(props: {
 
 	return (
 		<List
-			searchBarPlaceholder="Search projects"
-			isLoading={frecent.isLoading || server.isLoading}
+			searchBarPlaceholder="Search projects, or paste a merge request link"
+			isLoading={
+				frecent.isLoading || server.isLoading || (known ? linked.isLoading : false)
+			}
 			onSearchTextChange={setSearchText}
 			throttle
 			pagination={server.pagination}
@@ -148,6 +175,18 @@ function ProjectPicker(props: {
 				) : undefined
 			}
 		>
+			{link ? (
+				<LinkedMergeRequest
+					link={link}
+					mr={
+						// the hook keeps the last link's merge request while the next one loads
+						linked.data?.webUrl && known && linked.data.iid === known.iid
+							? linked.data
+							: undefined
+					}
+					error={linked.error}
+				/>
+			) : null}
 			{authError ? (
 				<List.EmptyView
 					icon={Icon.XMarkCircle}
@@ -240,4 +279,58 @@ function useAvatarFiles(
 	}, [wanted.map((project) => project.fullPath).join("\n")]);
 
 	return files;
+}
+
+/** The merge request a pasted link points at, as one row: ↵ copies the link
+ *  titled with its name. */
+function LinkedMergeRequest(props: {
+	link: MergeRequestLink;
+	mr?: MergeRequest;
+	error?: Error;
+}) {
+	const { link, mr } = props;
+	if (link.kind === "unknown")
+		return (
+			<List.EmptyView
+				icon={Icon.XMarkCircle}
+				title={`No token for ${link.hostName} in glab's config`}
+				description={`Run: glab auth login --hostname ${link.hostName}`}
+			/>
+		);
+	if (!mr)
+		return props.error ? (
+			<List.EmptyView icon={Icon.XMarkCircle} title={props.error.message} />
+		) : (
+			<List.EmptyView icon={Icon.Link} title={`Looking up !${link.iid}…`} />
+		);
+
+	const project: Project = {
+		fullPath: link.fullPath,
+		name: link.fullPath.split("/").pop() ?? link.fullPath,
+		webUrl: mr.webUrl.replace(/\/-\/merge_requests\/.*$/, ""),
+		lastActivityAt: mr.updatedAt,
+	};
+	return (
+		<List.Item
+			icon={{ value: STATE_ICON[mr.state], tooltip: mr.state }}
+			title={{ value: rowTitle(mr.title, mr.draft), tooltip: mr.title }}
+			subtitle={`!${mr.iid}`}
+			accessories={[{ text: link.fullPath }]}
+			actions={
+				<ActionPanel>
+					<CopyLinkAction mr={mr} />
+					<Action.OpenInBrowser
+						url={mr.webUrl}
+						shortcut={{ modifiers: ["shift"], key: "return" }}
+					/>
+					<CopyMarkdownAction mr={mr} />
+					<Action.Push
+						title="Show Merge Requests of the Project"
+						icon={Icon.List}
+						target={<MergeRequests host={link.host} project={project} />}
+					/>
+				</ActionPanel>
+			}
+		/>
+	);
 }

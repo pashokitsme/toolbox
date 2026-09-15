@@ -6,7 +6,7 @@
 # @raycast.mode compact
 
 # Optional parameters:
-# @raycast.icon 🦊
+# @raycast.icon images/gitlab.png
 # @raycast.packageName toolbox
 # @raycast.argument1 { "type": "text", "placeholder": "merge request link" }
 

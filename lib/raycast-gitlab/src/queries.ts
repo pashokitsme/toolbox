@@ -131,6 +131,52 @@ export async function fetchProjects(
 	);
 }
 
+type RawMergeRequest = {
+	iid: string;
+	title: string;
+	state: MergeRequestState;
+	draft: boolean;
+	webUrl: string;
+	updatedAt: string;
+	author: RawPerson | null;
+	headPipeline: { status: string } | null;
+};
+
+const MERGE_REQUEST_FIELDS = `iid title state draft webUrl updatedAt author { ${PERSON_FIELDS} } headPipeline { status }`;
+
+const toMergeRequest = (host: Host, raw: RawMergeRequest): MergeRequest => ({
+	iid: raw.iid,
+	title: raw.title,
+	state: raw.state,
+	draft: raw.draft,
+	webUrl: raw.webUrl,
+	updatedAt: raw.updatedAt,
+	author: raw.author
+		? toPerson(host, raw.author)
+		: { username: "ghost", name: "Deleted user" },
+	pipelineStatus: raw.headPipeline?.status ?? null,
+});
+
+/** The merge request a pasted link points at. */
+export async function fetchMergeRequest(
+	host: Host,
+	fullPath: string,
+	iid: string,
+): Promise<MergeRequest> {
+	const data = await graphql<{
+		project: { mergeRequest: RawMergeRequest | null } | null;
+	}>(
+		host,
+		`query($fullPath: ID!, $iid: String!) {
+      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { ${MERGE_REQUEST_FIELDS} } }
+    }`,
+		{ fullPath, iid },
+	);
+	const raw = projectOf(data, fullPath).mergeRequest;
+	if (!raw) throw new Error(`no merge request !${iid} in ${fullPath}`);
+	return toMergeRequest(host, raw);
+}
+
 export async function fetchMergeRequests(
 	host: Host,
 	fullPath: string,
@@ -140,18 +186,10 @@ export async function fetchMergeRequests(
 ): Promise<Page<MergeRequest>> {
 	// `in: [TITLE]` without `search` is an error, so both go in or neither does
 	const withSearch = search.length >= MIN_SEARCH;
-	type Raw = {
-		iid: string;
-		title: string;
-		state: MergeRequestState;
-		draft: boolean;
-		webUrl: string;
-		updatedAt: string;
-		author: RawPerson | null;
-		headPipeline: { status: string } | null;
-	};
 	const data = await graphql<{
-		project: { mergeRequests: { pageInfo: PageInfo; nodes: Raw[] } } | null;
+		project: {
+			mergeRequests: { pageInfo: PageInfo; nodes: RawMergeRequest[] };
+		} | null;
 	}>(
 		host,
 		`query($fullPath: ID!, $state: MergeRequestState, $draft: Boolean, $authorUsername: String,
@@ -161,7 +199,7 @@ export async function fetchMergeRequests(
                       authorUsername: $authorUsername, reviewerUsername: $reviewerUsername,
                       assigneeUsername: $assigneeUsername${withSearch ? ", search: $search, in: [TITLE]" : ""}) {
           pageInfo { hasNextPage endCursor }
-          nodes { iid title state draft webUrl updatedAt author { ${PERSON_FIELDS} } headPipeline { status } }
+          nodes { ${MERGE_REQUEST_FIELDS} }
         }
       }
     }`,
@@ -174,18 +212,7 @@ export async function fetchMergeRequests(
 	);
 	const connection = projectOf(data, fullPath).mergeRequests;
 	return page(
-		connection.nodes.map((raw) => ({
-			iid: raw.iid,
-			title: raw.title,
-			state: raw.state,
-			draft: raw.draft,
-			webUrl: raw.webUrl,
-			updatedAt: raw.updatedAt,
-			author: raw.author
-				? toPerson(host, raw.author)
-				: { username: "ghost", name: "Deleted user" },
-			pipelineStatus: raw.headPipeline?.status ?? null,
-		})),
+		connection.nodes.map((raw) => toMergeRequest(host, raw)),
 		connection.pageInfo,
 	);
 }
