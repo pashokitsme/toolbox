@@ -46,6 +46,40 @@ so Claude picks it up in every project.
 |---|---|
 | `obscura` | When to use the obscura headless browser and `ofetch` over `WebFetch`, `WebSearch` or Playwright, which of the 37 `browser_*` MCP tools to reach for and which of them are quietly broken, and the places obscura's own docs disagree with the shipped binary. |
 
+## Raycast
+
+`raycast/` holds Raycast script commands. `install.sh` leaves them alone — add
+the directory once in Raycast under Settings → Script Commands → Add Script
+Directory, and every script in it becomes a command.
+
+| | |
+|---|---|
+| `GitLab: MR Name` | `glmr -y` for a merge request link: copies it as a link titled with the merge request's name. |
+| `GitLab: Show MRs` | Merge requests of a project: projects in the order you last opened them, filters by people, state, draft and pipeline, details in a side panel, ⌘C for a titled link. An extension rather than a script, see below. |
+
+`GitLab: Show MRs` lives in `lib/raycast-gitlab`. It reads hosts and tokens from
+glab's own config, so a host shows up once `glab auth login --hostname <host>`
+has saved a token for it (a token kept in the keychain is not seen). To put it
+into Raycast:
+
+```sh
+cd lib/raycast-gitlab
+bun install        # ./install.sh does this too
+bun run dev        # imports the extension; it stays after ⌃C
+```
+
+| Keys | |
+|---|---|
+| ↵ | details of the merge request in a side panel |
+| ⌘C / ⌘⇧C | copy a link titled with the merge request's name / the same as markdown |
+| ⇧↵ | open in the browser |
+| ⌘1 / ⌘2 | only merge requests by me / by Claude — again to clear |
+| ⌘F | state, draft, pipeline, reviewer, assignee, or any author |
+| ⌘R | refresh |
+
+Claude's GitLab username (`claude` unless set) is in the extension's
+preferences in Raycast.
+
 Each tool documents its own flags, keys and environment variables: run it with
 `--help` (`glab-mrs --help`, `git-ai-commit --help`), or read the comment block
 at the top of the file for the two Parallels scripts.

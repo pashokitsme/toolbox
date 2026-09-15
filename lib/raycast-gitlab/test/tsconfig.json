@@ -1,0 +1,9 @@
+{
+	"extends": "../tsconfig.json",
+	"include": ["**/*.ts", "../src/**/*", "../raycast-env.d.ts"],
+	"compilerOptions": {
+		"module": "Preserve",
+		"moduleResolution": "bundler",
+		"types": ["bun", "node"]
+	}
+}
