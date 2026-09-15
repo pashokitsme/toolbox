@@ -1,0 +1,21 @@
+# mcz profiles. `mcz -p NAME` picks one; fast is the default.
+# A table changes only the keys it names, a new [profile.NAME] starts from fast,
+# and flags on the command line override all of it. `mcz --help` has the details.
+
+[profile.fast]
+image_quality = 85        # 1-100, for JPEG, WebP, AVIF and HEIC
+image_blur = 0.05         # gaussian sigma before lossy image encoding; shrinks JPEGs noticeably; 0 is off
+video_codec = "libx264"   # any ffmpeg video encoder: libx265, hevc_videotoolbox, libsvtav1, libvpx-vp9, ...
+video_crf = 23            # 0-63 (libx264 and libx265 stop at 51), lower looks better and weighs more
+video_preset = "fast"     # encoder speed preset; "" passes none
+audio_bitrate = "128k"    # AAC, or Opus in .webm
+max = 0                   # longest side in pixels for images and videos, never upscaled; 0 is no limit
+
+[profile.small]
+image_quality = 72        # 1-100
+image_blur = 0.05         # 0 is off
+video_codec = "libx265"   # HEVC, 10-bit when the source is
+video_crf = 28            # 0-63
+video_preset = "medium"   # slower than fast, smaller files
+audio_bitrate = "96k"     # AAC, or Opus in .webm
+max = 0                   # 0 is no limit

@@ -1,0 +1,13 @@
+{
+	"name": "mcz",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Shrink photos and videos with ImageMagick and ffmpeg, from a file picker or the command line",
+	"bin": {
+		"mcz": "./main.ts"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
+}

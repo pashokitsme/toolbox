@@ -234,8 +234,11 @@ check() { # check <command> <who needs it>
 		say "  missing  $1 — $2"
 	fi
 }
-check bun "glab-mrs, adoc"
+check bun "glab-mrs, adoc, mcz"
 check glab "glab-mrs"
+check magick "mcz"
+check ffmpeg "mcz"
+check ffprobe "mcz"
 check claude "git-ai-commit"
 check git "git-ai-commit"
 check obscura "ofetch"

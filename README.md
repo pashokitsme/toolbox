@@ -25,6 +25,7 @@ installed tool, config or skill changes with it.
 | `adoc` | Car parts off autodoc.ru without a browser: search by part number or name, product card with rating and reviews, seller prices and delivery times, and your own basket, favorites and orders. Not linked from here — [its own tool](https://github.com/pashokitsme/adoc), which `install.sh` installs with `bun install -g`. |
 | `ccp` | Claude Code account profiles: several logins on this machine that share everything else — sessions, settings, skills, plugins — so moving between accounts is `ccp use <name>` instead of logging out and back in. Switches the command line and the Claude Desktop app together (the app restarts). Needs `eval "$(ccp --shell-init)"` in `~/.zshrc`, a one-time `ccp migrate <name>` with Claude quit, and one login per profile in each. |
 | `git-ai-commit` | Stages everything, writes the commit message with Claude from the staged diff, commits and pushes. |
+| `mcz` | Shrinks photos and videos with ImageMagick and ffmpeg: pick them in a full-screen list or the macOS file dialog, or name them on the command line, and get `name.compressed.ext` beside each — EXIF dropped, color profile kept, and only when it came out smaller. Profiles `fast` and `small`, tuned in `mcz.toml`. |
 | `ofetch` | Renders a page in the obscura headless browser and saves it as markdown (or text, html, links, assets), printing the file path and a preview rather than the whole document — so an agent can grep out the part it needs. |
 | `tauri-win` | Runs `tauri dev` for the Gramax desktop app cross-compiled to Windows, with the app itself running in a Parallels VM. |
 | `prl-win-run` | The cargo runner behind `tauri-win`: executes a Windows binary inside the Parallels VM. Not called by hand. |
@@ -33,8 +34,8 @@ installed tool, config or skill changes with it.
 
 Every entry of `config/` is linked into `~/.config` under the same name —
 `ghostty`, `helix` and `zellij` as whole directories (so files an application
-writes into its own directory land in this checkout), `starship.toml` as a single
-file.
+writes into its own directory land in this checkout), `starship.toml` and
+`mcz.toml` as single files.
 
 ## Skills
 
