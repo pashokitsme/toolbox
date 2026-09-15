@@ -20,7 +20,6 @@ one-liner stopped being true.
 | `lib/<tool>/` | Multi-file tools with their own dependencies (`package.json`, lockfile, config). |
 | `config/<app>` | Application configs, one entry per `~/.config` name — a whole directory (`config/helix`) or a single file (`config/starship.toml`). |
 | `skills/<name>/` | Claude skills, one directory per skill with a `SKILL.md`. Linked into `~/.claude/skills`, so they apply in every project, not just this one. |
-| `raycast/` | Raycast script commands. `install.sh` does not touch it: Raycast reads the directory itself once it is added under Settings → Script Commands → Add Script Directory. Scripts run with a bare `PATH` and without `~/.zshrc`, so each one sets up its own. A script with a single argument can be a fallback command, which is what takes a link pasted into the root search — `GitLab: MR Name` is a script for that reason. The Raycast extension is not here but in `lib/raycast-gitlab`, a Bun package like the other `lib/` tools. |
 | `install.sh` | Links `bin/*` into `$PREFIX/bin` (default `~/.local`), `config/*` into `$XDG_CONFIG_HOME` (default `~/.config`) and `skills/*` into `~/.claude/skills`, installs `lib/` dependencies, reports missing external commands. |
 
 Adding a tool: drop a single executable file in `bin/`, or put the package in
@@ -60,20 +59,22 @@ browser, the clipboard, the CI endpoints). It is on `PATH` twice: `bin/glab-mrs`
 and `bin/glmr` are two links to the same `main.ts`, so the name it is called by
 is not something the tool can read — `--help` spells both out by hand.
 
-`lib/raycast-gitlab` is the Raycast extension behind `GitLab: Show MRs`. It is
-not on `PATH`: `bun run dev` inside it imports it into Raycast once, and it
-stays there after ⌃C. Logic lives in modules that do not import
-`@raycast/api`, so `bun test` can load them — keep new logic there; `bunx tsc
---noEmit` checks `src/` (`-p test` checks the tests), and `bun test/smoke.ts
-<host> <group/project>` runs every GraphQL query against a real host — keep
-work hosts and project names out of the repository, it is public.
-`@raycast/api` is pinned to 1.104 to match the
-installed Raycast (2.x targets the new desktop app). Tokens come from glab's
-`config.yml`, because Raycast hands an extension none of the shell's
-environment; hosts are never cached, since a `Host` carries its token. Project
-avatars are fetched through `/api/v4/projects/:id/avatar` and kept in the
-extension's support directory — the avatar url itself only answers a browser
-session.
+`lib/raycast` is the Toolbox extension for Raycast: `GitLab: Show MRs`,
+`GitLab: MR Name` and `Shell`. It is not on `PATH`: `bun run dev` inside it
+registers it with Raycast (it stays after ⌃C), and `bunx ray build -e dist -o
+~/.config/raycast/extensions/toolbox` puts the optimized build in place of the
+development one. Logic lives in modules that do not import `@raycast/api`, so
+`bun test` can load them — keep new logic there; `bunx tsc --noEmit` checks
+`src/` (`-p test` checks the tests), and `bun test/smoke.ts <host>
+<group/project>` runs every GraphQL query against a real host — keep work hosts
+and project names out of the repository, it is public. `@raycast/api` is pinned
+to 1.104 to match the installed Raycast (2.x targets the new desktop app).
+Tokens come from glab's `config.yml`, because Raycast hands an extension none of
+the shell's environment; hosts are never cached, since a `Host` carries its
+token. Project avatars are fetched through `/api/v4/projects/:id/avatar` and
+kept in the extension's support directory — the avatar url itself only answers
+a browser session. `Shell` runs an interactive login zsh in its own process
+group, because an interactive zsh ignores SIGTERM: stopping signals the group.
 
 `adoc` is **not in this checkout at all** — it is [its own
 tool](https://github.com/pashokitsme/adoc), and `install.sh` installs it with

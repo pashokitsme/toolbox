@@ -23,17 +23,14 @@ import { useEffect, useRef, useState } from "react";
 import { projectAvatarFile } from "./avatars";
 import { loadHosts, type Host } from "./glab-config";
 import { AuthError } from "./gitlab";
-import { STATE_ICON } from "./icons";
-import { CopyLinkAction, CopyMarkdownAction } from "./link-actions";
 import { MergeRequests } from "./merge-requests";
-import { type MergeRequestLink, parseMergeRequestLink } from "./mr-link";
+import { LinkedMergeRequest } from "./linked-merge-request";
+import { parseMergeRequestLink } from "./mr-link";
 import {
 	fetchFrecentProjects,
 	fetchMergeRequest,
 	fetchProjects,
 	MIN_SEARCH,
-	type MergeRequest,
-	type Project,
 } from "./queries";
 import {
 	orderProjects,
@@ -43,7 +40,6 @@ import {
 	removeRecent,
 	type RecentProject,
 } from "./recent";
-import { rowTitle } from "./title";
 
 export default function Command() {
 	// not useCachedPromise: a Host carries its token, and Raycast's cache is a plain file
@@ -279,58 +275,4 @@ function useAvatarFiles(
 	}, [wanted.map((project) => project.fullPath).join("\n")]);
 
 	return files;
-}
-
-/** The merge request a pasted link points at, as one row: ↵ copies the link
- *  titled with its name. */
-function LinkedMergeRequest(props: {
-	link: MergeRequestLink;
-	mr?: MergeRequest;
-	error?: Error;
-}) {
-	const { link, mr } = props;
-	if (link.kind === "unknown")
-		return (
-			<List.EmptyView
-				icon={Icon.XMarkCircle}
-				title={`No token for ${link.hostName} in glab's config`}
-				description={`Run: glab auth login --hostname ${link.hostName}`}
-			/>
-		);
-	if (!mr)
-		return props.error ? (
-			<List.EmptyView icon={Icon.XMarkCircle} title={props.error.message} />
-		) : (
-			<List.EmptyView icon={Icon.Link} title={`Looking up !${link.iid}…`} />
-		);
-
-	const project: Project = {
-		fullPath: link.fullPath,
-		name: link.fullPath.split("/").pop() ?? link.fullPath,
-		webUrl: mr.webUrl.replace(/\/-\/merge_requests\/.*$/, ""),
-		lastActivityAt: mr.updatedAt,
-	};
-	return (
-		<List.Item
-			icon={{ value: STATE_ICON[mr.state], tooltip: mr.state }}
-			title={{ value: rowTitle(mr.title, mr.draft), tooltip: mr.title }}
-			subtitle={`!${mr.iid}`}
-			accessories={[{ text: link.fullPath }]}
-			actions={
-				<ActionPanel>
-					<CopyLinkAction mr={mr} />
-					<Action.OpenInBrowser
-						url={mr.webUrl}
-						shortcut={{ modifiers: ["shift"], key: "return" }}
-					/>
-					<CopyMarkdownAction mr={mr} />
-					<Action.Push
-						title="Show Merge Requests of the Project"
-						icon={Icon.List}
-						target={<MergeRequests host={link.host} project={project} />}
-					/>
-				</ActionPanel>
-			}
-		/>
-	);
 }

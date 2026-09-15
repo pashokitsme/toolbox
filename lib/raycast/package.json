@@ -1,0 +1,83 @@
+{
+	"$schema": "https://www.raycast.com/schemas/extension.json",
+	"name": "toolbox",
+	"title": "Toolbox",
+	"description": "Personal Raycast commands from the toolbox repository: GitLab merge requests, and a zsh command line.",
+	"icon": "terminal.png",
+	"author": "pavel_smirnov",
+	"platforms": [
+		"macOS"
+	],
+	"categories": [
+		"Developer Tools"
+	],
+	"license": "MIT",
+	"commands": [
+		{
+			"name": "show-mrs",
+			"title": "GitLab: Show MRs",
+			"description": "Pick a project, then browse and filter its merge requests.",
+			"mode": "view",
+			"icon": "gitlab.png"
+		},
+		{
+			"name": "mr-name",
+			"title": "GitLab: MR Name",
+			"description": "Copy a merge request link titled with the merge request's name. Takes the link as its argument or from the root search as a fallback command; without one, opens a prompt filled in from the clipboard.",
+			"mode": "view",
+			"icon": "gitlab.png",
+			"arguments": [
+				{
+					"name": "link",
+					"type": "text",
+					"placeholder": "merge request link",
+					"required": false
+				}
+			]
+		},
+		{
+			"name": "shell",
+			"title": "Shell",
+			"subtitle": "zsh",
+			"description": "Run a command in zsh from the home directory, with your ~/.zshrc, and show what it prints. Without a command, opens a full-width prompt with the commands run before.",
+			"mode": "view",
+			"arguments": [
+				{
+					"name": "command",
+					"type": "text",
+					"placeholder": "command",
+					"required": false
+				}
+			],
+			"icon": "terminal.png"
+		}
+	],
+	"preferences": [
+		{
+			"name": "claudeUsername",
+			"title": "Claude's GitLab Username",
+			"description": "Whose merge requests By Claude (⌘2) shows.",
+			"type": "textfield",
+			"required": false,
+			"default": "claude",
+			"placeholder": "claude"
+		}
+	],
+	"dependencies": {
+		"@raycast/api": "1.104.25",
+		"@raycast/utils": "1.19.1",
+		"yaml": "^2"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.4.2",
+		"@types/node": "22.13.10",
+		"@types/react": "19.0.10",
+		"typescript": "^5"
+	},
+	"scripts": {
+		"dev": "ray develop",
+		"build": "ray build -e dist",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	}
+}
