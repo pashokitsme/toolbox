@@ -39,7 +39,19 @@
 // `--user-data-dir=<that directory>`, so a test against another HOME never sees
 // the real app, and never quits it.
 
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	renameSync,
+	rmSync,
+	statSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { DESKTOP_FILE, HOME, profileDir } from "./paths.ts";
 import { type Check, listNames, readAccount } from "./profile.ts";
@@ -49,7 +61,14 @@ export const APP_DIR = join(HOME, "Library", "Application Support", "Claude");
 const APP_NAME = "Claude";
 
 /** The entries that carry the login. Order does not matter; all move together. */
-const ENTRIES = ["Cookies", "Cookies-journal", "config.json", "Local Storage", "Session Storage", "IndexedDB"] as const;
+const ENTRIES = [
+	"Cookies",
+	"Cookies-journal",
+	"config.json",
+	"Local Storage",
+	"Session Storage",
+	"IndexedDB",
+] as const;
 
 export function snapshotDir(name: string): string {
 	return join(profileDir(name), "desktop");
@@ -66,8 +85,12 @@ export function hasSnapshot(name: string): boolean {
 /** The account the app was last signed into, by its own record. */
 export function appAccountUuid(): string | undefined {
 	try {
-		const cfg = JSON.parse(readFileSync(join(APP_DIR, "config.json"), "utf8")) as Record<string, unknown>;
-		return typeof cfg.lastKnownAccountUuid === "string" ? cfg.lastKnownAccountUuid : undefined;
+		const cfg = JSON.parse(
+			readFileSync(join(APP_DIR, "config.json"), "utf8"),
+		) as Record<string, unknown>;
+		return typeof cfg.lastKnownAccountUuid === "string"
+			? cfg.lastKnownAccountUuid
+			: undefined;
 	} catch {
 		return undefined;
 	}
@@ -115,6 +138,24 @@ function helperPids(): number[] {
 	return pids;
 }
 
+/**
+ * CLAUDE_CONFIG_DIR as the running app sees it. The app hands its environment
+ * to every session it spawns, so a value here pins all of them to one profile's
+ * config home — what `launchApp` avoids, and what an app started by hand from
+ * a ccp shell still gets.
+ */
+export function appConfigDirVar(): string | undefined {
+	const ps = Bun.spawnSync(["ps", "-Ao", "pid=,args="]);
+	const main = ps.stdout
+		.toString()
+		.split("\n")
+		.find((l) => l.trimEnd().endsWith(`/${APP_NAME}.app/Contents/MacOS/${APP_NAME}`));
+	const pid = main ? Number(main.trim().split(/\s+/)[0]) : NaN;
+	if (!Number.isInteger(pid)) return undefined;
+	const env = Bun.spawnSync(["ps", "eww", "-o", "command=", "-p", String(pid)]);
+	return /(?:^|\s)CLAUDE_CONFIG_DIR=(\S+)/.exec(env.stdout.toString())?.[1];
+}
+
 export function appRunning(): boolean {
 	return helperPids().length > 0;
 }
@@ -133,11 +174,26 @@ export function quitApp(): void {
 		}
 		sleep(250);
 	}
-	throw new Error("Claude Desktop did not quit — close it yourself and run `ccp use` again");
+	throw new Error(
+		"Claude Desktop did not quit — close it yourself and run `ccp use` again",
+	);
 }
 
+/**
+ * Start the app without the shell's profile variables. `open` hands its own
+ * environment to the app it launches, and ccp runs in a shell that still exports
+ * the profile it is switching *from* — the app would pin every session it spawns
+ * to that profile's config home (its .claude.json, and so the account recorded
+ * there), whatever account the app is signed into.
+ */
 export function launchApp(): void {
-	Bun.spawn(["open", "-a", APP_NAME], { stdio: ["ignore", "ignore", "ignore"] }).unref();
+	const env = { ...process.env };
+	delete env.CLAUDE_CONFIG_DIR;
+	delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+	Bun.spawn(["open", "-a", APP_NAME], {
+		env,
+		stdio: ["ignore", "ignore", "ignore"],
+	}).unref();
 }
 
 export type AppSwitch =
@@ -179,7 +235,9 @@ export function switchApp(target: string): AppSwitch {
 	recordLive(target);
 	const synced = syncSessionLists(); // with the app down, this is the moment the lists can move
 	if (running) launchApp();
-	return fresh ? { kind: "fresh", from, relaunched: running, synced } : { kind: "switched", from, relaunched: running, synced };
+	return fresh
+		? { kind: "fresh", from, relaunched: running, synced }
+		: { kind: "switched", from, relaunched: running, synced };
 }
 
 const APP_SESSIONS = join(APP_DIR, "claude-code-sessions");
@@ -247,7 +305,8 @@ function planSessionSync(): SessionSync {
 	for (const [name, best] of newest) {
 		const id = name.slice("local_".length, -".json".length);
 		if (deleted.has(id)) {
-			for (const list of present.get(name) ?? []) plan.remove.push(join(list, name));
+			for (const list of present.get(name) ?? [])
+				plan.remove.push(join(list, name));
 			continue;
 		}
 		for (const list of lists) {
@@ -301,12 +360,21 @@ export function desktopChecks(): Check[] {
 			{
 				ok: false,
 				label: `Desktop app: recorded as ${recorded}, signed in as ${detected}'s account`,
-				detail: "sign in there as the right account, or `ccp app " + detected + "`",
+				detail:
+					"sign in there as the right account, or `ccp app " + detected + "`",
 			},
 		];
 	const on = recorded ?? detected;
 	const pending = sessionSyncPending();
+	const pinned = appConfigDirVar();
 	return [
+		{
+			ok: pinned === undefined,
+			label: "Desktop app: sessions follow the current profile",
+			detail: pinned
+				? `the app was started with CLAUDE_CONFIG_DIR=${pinned}, so its sessions use that profile's config — restart it with \`ccp use <name>\`, or quit it and open it from the Dock`
+				: undefined,
+		},
 		{
 			ok: on !== undefined,
 			label: "Desktop app: which profile it is on",
@@ -325,4 +393,3 @@ export function desktopChecks(): Check[] {
 		},
 	];
 }
-
