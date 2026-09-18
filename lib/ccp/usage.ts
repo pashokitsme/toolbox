@@ -4,13 +4,11 @@
 // Both come from endpoints Claude Code itself uses, authorized with the
 // profile's OAuth access token: GET https://api.anthropic.com/api/oauth/profile
 // for the account, /api/oauth/usage for the limits. The token lives in the
-// profile's Keychain item (`Claude Code-credentials-<sha256(dir)[0..8]>`); ccp
-// reads it for these requests and nothing else — it is never printed, stored,
-// refreshed, or sent anywhere but api.anthropic.com. A token past its expiry is
-// left alone: refreshing it rotates the refresh token, and that is Claude Code's
-// job. For such a profile, and whenever a request fails, the limits fall back to
-// the copy Claude Code keeps in <profile>/.claude.json (cachedUsageUtilization),
-// labelled with its age.
+// profile's Keychain item (see token.ts); an expired one is renewed first, the
+// way Claude Code renews it. It is never printed, stored anywhere but that item,
+// or sent anywhere but Anthropic. When the token cannot be had, and whenever a
+// request fails, the limits fall back to the copy Claude Code keeps in
+// <profile>/.claude.json (cachedUsageUtilization), labelled with its age.
 //
 // The token, not .claude.json, is the authority on the account. The file can
 // name somebody else: a Claude Code session running on another account's
@@ -20,8 +18,9 @@
 // which is readable without a request and so works on expired tokens too.
 
 import { readFileSync } from "node:fs";
-import { profileConfig, profileDir } from "./paths.ts";
+import { profileConfig } from "./paths.ts";
 import { C } from "./term.ts";
+import { type Stored, storedToken, usableToken } from "./token.ts";
 
 const API = "https://api.anthropic.com";
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -70,57 +69,25 @@ export function planName(
 	return mult ? `${base} ${mult}x` : base;
 }
 
-/** The Keychain item Claude Code uses for a config home it was started with. */
-function keychainService(dir: string): string {
-	const hash = new Bun.CryptoHasher("sha256")
-		.update(dir.normalize("NFC"))
-		.digest("hex")
-		.slice(0, 8);
-	return `Claude Code-credentials-${hash}`;
-}
-
-type Token = { accessToken?: string; expired: boolean; plan?: string };
-
-function readToken(name: string): Token | undefined {
-	const r = Bun.spawnSync(
-		[
-			"security",
-			"find-generic-password",
-			"-s",
-			keychainService(profileDir(name)),
-			"-w",
-		],
-		{
-			stderr: "ignore",
-		},
-	);
-	if (r.exitCode !== 0) return undefined;
-	try {
-		const oauth = (JSON.parse(r.stdout.toString()) as Json).claudeAiOauth;
-		if (!isObj(oauth)) return undefined;
-		return {
-			accessToken:
-				typeof oauth.accessToken === "string" ? oauth.accessToken : undefined,
-			expired:
-				typeof oauth.expiresAt === "number" && oauth.expiresAt <= Date.now(),
-			plan:
-				typeof oauth.subscriptionType === "string"
-					? planName(
-							`claude_${oauth.subscriptionType}`,
-							typeof oauth.rateLimitTier === "string"
-								? oauth.rateLimitTier
-								: "",
-						)
-					: undefined,
-		};
-	} catch {
-		return undefined;
-	}
+/** The plan a token was issued for, as the Keychain item records it. */
+function storedPlan(oauth: Json): string | undefined {
+	return typeof oauth.subscriptionType === "string"
+		? planName(
+				`claude_${oauth.subscriptionType}`,
+				typeof oauth.rateLimitTier === "string" ? oauth.rateLimitTier : "",
+			)
+		: undefined;
 }
 
 /** The plan a profile's token was issued for, without a request. */
 export function tokenPlan(name: string): string | undefined {
-	return readToken(name)?.plan;
+	const stored = storedToken(name);
+	return stored && storedPlan(stored.oauth);
+}
+
+function accessToken(stored: Stored | undefined): string | undefined {
+	const t = stored?.oauth.accessToken;
+	return typeof t === "string" && t ? t : undefined;
 }
 
 type Answer =
@@ -255,27 +222,21 @@ export async function inspect(
 	name: string,
 	fileAccountUuid: string | undefined,
 ): Promise<Inspection> {
-	const renew = `start claude on ${name} to renew it`;
 	const orCache = (uuid: string | undefined, why: string): UsageResult =>
 		fromCache(name, uuid, why) ?? { error: why };
 
-	const token = readToken(name);
-	if (!token?.accessToken)
+	const state = await usableToken(name);
+	const plan = state.stored && storedPlan(state.stored.oauth);
+	const token = accessToken(state.stored);
+	if (state.problem || !token)
 		return {
-			usage: orCache(
-				fileAccountUuid,
-				`no token in the Keychain — \`ccp use ${name}\` then /login`,
-			),
-		};
-	if (token.expired)
-		return {
-			tokenPlan: token.plan,
-			usage: orCache(fileAccountUuid, `token expired — ${renew}`),
+			tokenPlan: plan,
+			usage: orCache(fileAccountUuid, state.problem ?? "the Keychain item holds no access token"),
 		};
 
 	const [profile, usage] = await Promise.all([
-		get("/api/oauth/profile", token.accessToken),
-		get("/api/oauth/usage", token.accessToken),
+		get("/api/oauth/profile", token),
+		get("/api/oauth/usage", token),
 	]);
 	const identity = profile.ok ? toIdentity(profile.body) : undefined;
 	const uuid = identity?.uuid ?? fileAccountUuid;
@@ -283,16 +244,16 @@ export async function inspect(
 	if (!usage.ok) {
 		const why =
 			usage.status === 401
-				? `token rejected — ${renew}`
+				? `token rejected — /login in ${name}`
 				: `usage request ${usage.why}`;
-		return { identity, tokenPlan: token.plan, usage: orCache(uuid, why) };
+		return { identity, tokenPlan: plan, usage: orCache(uuid, why) };
 	}
 	const windows = isObj(usage.body)
 		? (fromLimits(usage.body.limits) ?? fromWindows(usage.body))
 		: [];
 	return {
 		identity,
-		tokenPlan: token.plan,
+		tokenPlan: plan,
 		usage: windows.length
 			? { windows }
 			: orCache(uuid, "the usage answer held no limits"),

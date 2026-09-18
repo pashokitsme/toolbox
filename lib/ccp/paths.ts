@@ -53,6 +53,8 @@ export function isPrivate(entry: string): boolean {
 		entry.startsWith(`${GLOBAL_CONFIG}.`) || // .claude.json.backup, .pre-ccp
 		entry === "backups" || // Claude Code's own copies of .claude.json
 		entry === ".credentials.json" || // plaintext fallback for the Keychain
+		entry === ".oauth_refresh.lock" || // Claude Code's (and ccp's) token-refresh lock
+		entry.startsWith(".storage-write") || // Claude Code's credential-write lock
 		entry === "daemon" ||
 		entry.startsWith("daemon.") ||
 		entry.startsWith("daemon-") ||
@@ -73,7 +75,17 @@ export const RESERVED = new Set(["use", "ls", "list", "new", "app", "doctor", "r
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/**
+ * Claude Code takes `<config home>.lock` — next to the profile, in
+ * ~/.claude-profiles — for the length of every token refresh, so no profile
+ * can be named like that and no such directory is one.
+ */
+export function isLockName(name: string): boolean {
+	return name.endsWith(".lock");
+}
+
 export function nameError(name: string): string | undefined {
+	if (isLockName(name)) return `"${name}" ends in .lock, which Claude Code uses for its refresh locks next to each profile`;
 	if (!NAME_RE.test(name))
 		return `"${name}" is not a usable profile name: start with a letter or digit, then letters, digits, dot, dash or underscore`;
 	if (RESERVED.has(name)) return `"${name}" is a ccp subcommand, so it cannot name a profile`;

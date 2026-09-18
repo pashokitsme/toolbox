@@ -25,6 +25,7 @@ import {
 	SHARED_DIR,
 	SETTINGS_SNAPSHOT,
 	isIgnored,
+	isLockName,
 	isPrivate,
 	profileConfig,
 	profileDir,
@@ -166,7 +167,7 @@ export function activeName(): string | undefined {
 export function listNames(): string[] {
 	if (!existsSync(PROFILES_DIR)) return [];
 	return readdirSync(PROFILES_DIR)
-		.filter((e) => !e.startsWith("."))
+		.filter((e) => !e.startsWith(".") && !isLockName(e))
 		.filter((e) => {
 			try {
 				return lstatSync(join(PROFILES_DIR, e)).isDirectory();

@@ -104,13 +104,24 @@
 // date and as a countdown; `ccp use` shows them for the profile it switched to.
 // They come live from the same endpoint Claude Code's /usage reads, which takes
 // the profile's OAuth access token, so ccp reads that token from the Keychain for
-// the one request: never printed, stored, refreshed or sent anywhere but
-// api.anthropic.com. An expired token is not refreshed — that rotates the
-// refresh token, which is Claude Code's to do — and the numbers then come from
-// Claude Code's own cached copy, labelled with its age.
+// the request: never printed, stored anywhere else or sent anywhere but
+// Anthropic. When a request cannot be made, the numbers come from Claude Code's
+// own cached copy, labelled with its age.
 //
-// ccp never writes or moves a token. `ccp new` gets you as far as an empty
-// profile; logging it in is `/login`, done by you.
+// Renewal: the access token lives eight hours, and only a `claude` run in that
+// profile renews it — Desktop-app sessions use the app's token and leave the
+// profile's alone. So an expired token is the normal state of a profile used
+// through the app, and ccp renews it itself, as Claude Code does: under Claude
+// Code's own refresh locks (<profile>/.oauth_refresh.lock and
+// ~/.claude-profiles/<profile>.lock, which is why no profile may end in .lock),
+// re-reading the Keychain item first and writing the new pair back only over
+// the refresh token it posted. A `claude` running in the profile meanwhile
+// picks the new token up. A refresh token that is no longer accepted still
+// needs `/login` in that profile.
+//
+// ccp never moves a token between profiles, and its only write to one is that
+// renewal. `ccp new` gets you as far as an empty profile; logging it in is
+// `/login`, done by you.
 
 import { existsSync } from "node:fs";
 import { migrate, undoMigration } from "./migrate.ts";
@@ -153,6 +164,8 @@ ${C.dim('Setup: eval "$(ccp --shell-init)" in ~/.zshrc, then, with Claude quit,'
 ${C.dim("`ccp migrate <name>` from a plain terminal; /login once in each profile.")}
 
 ${C.dim("Profiles differ in the account only; everything else is shared.")}
+${C.dim("An expired token is renewed the way Claude Code renews it, under its refresh locks;")}
+${C.dim("/login is needed only when the refresh token itself is refused.")}
 ${C.dim("Switching quits and restarts the Claude Desktop app with the profile's login;")}
 ${C.dim("a profile the app has never signed into starts it signed out — sign in once there.")}`;
 
