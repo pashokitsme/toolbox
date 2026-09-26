@@ -11,6 +11,10 @@ arp-scan
 lldpd
 mosh
 
+# graphics: SystemRescue's mesa-minimal has no OpenGL drivers at all, and
+# ghostty cannot draw without them (chroot.sh lets mesa replace it)
+mesa
+
 # disks
 fio
 gdu

@@ -34,6 +34,9 @@ alias claude="claude --allow-dangerously-skip-permissions --dangerously-skip-per
 
 [ -r "$__zsh_plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ] &&
 	source "$__zsh_plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+# grml-zsh-config (the global zshrc on SystemRescue and the Arch ISO) redraws its
+# own prompt before every command; switch its prompt theme off so starship's stays
+(( $+commands[starship] )) && (( $+functions[prompt] )) && prompt off
 (( $+commands[starship] )) && source <(starship init zsh --print-full-init)
 if (( $+commands[zoxide] )); then
 	eval "$(zoxide init zsh)"

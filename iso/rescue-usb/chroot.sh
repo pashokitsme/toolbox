@@ -55,7 +55,9 @@ mv "$rolling.new" "$rolling"
 say "installing packages"
 mapfile -t packages < <(grep -v '^\s*\(#\|$\)' "$packages_file")
 pacman "${pacman_opts[@]}" -Sy --noconfirm
-pacman "${pacman_opts[@]}" -S --needed --noconfirm "${packages[@]}"
+# --ask 4 says yes to replacing a conflicting package (mesa-minimal by mesa),
+# which --noconfirm alone would refuse
+pacman "${pacman_opts[@]}" -S --needed --noconfirm --ask 4 "${packages[@]}"
 
 say "helix answers to hx, as on the Mac (Arch names the binary helix)"
 [ -x /usr/bin/helix ] || die "/usr/bin/helix is missing"
