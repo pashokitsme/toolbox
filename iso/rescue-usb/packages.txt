@@ -10,6 +10,18 @@ nethogs
 arp-scan
 lldpd
 mosh
+trippy
+gping
+bandwhich
+nload
+termshark
+wavemon
+fping
+ipcalc
+nbtscan
+net-snmp
+testssl.sh
+ngrep
 
 # graphics: SystemRescue's mesa-minimal has no OpenGL drivers at all, and
 # ghostty cannot draw without them (chroot.sh lets mesa replace it)
