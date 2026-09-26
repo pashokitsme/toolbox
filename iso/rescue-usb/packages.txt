@@ -1,6 +1,7 @@
 # Packages rescue-usb adds on top of SystemRescue, one per line.
 # They come from SystemRescue's archive snapshot, so every one of them must
 # exist in Arch's repositories on that SystemRescue release's date.
+# (bun is not here: chroot.sh installs its baseline build, which needs no AVX2.)
 
 # network
 tailscale
@@ -29,7 +30,6 @@ eza
 git-delta
 github-cli
 glab
-bun
 jq
 ttf-jetbrains-mono-nerd
 

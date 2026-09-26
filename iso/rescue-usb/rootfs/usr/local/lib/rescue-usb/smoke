@@ -18,6 +18,12 @@ systemctl is-active --quiet tailscaled || bad "tailscaled is not running"
 iptables -S INPUT | grep -q -- '-i tailscale0 -j ACCEPT' || bad "iptables: tailscale0 not accepted"
 ip6tables -S INPUT | grep -q -- '-i tailscale0 -j ACCEPT' || bad "ip6tables: tailscale0 not accepted"
 
+grep -q '^Server = https://mirror.surf/archlinux-archive/repos/' /etc/pacman.d/mirrorlist-snapshot ||
+	bad "snapshot mirrorlist lacks mirror.surf"
+grep -q '^Server = https://mirror.yandex.ru/archlinux/' /etc/pacman.d/mirrorlist ||
+	bad "rolling mirrorlist lacks the Russian mirrors"
+bun --version >/dev/null 2>&1 || bad "bun does not run"
+
 # the sync databases are in the image: a package SystemRescue does not ship resolves without -Sy
 pacman -Si nginx >/dev/null 2>&1 || bad "pacman sync database missing"
 
