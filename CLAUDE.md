@@ -95,8 +95,9 @@ Touching one usually means checking the other.
 
 `iso/rescue-usb` builds on SystemRescue instead of from scratch: `build.sh`
 verifies the SystemRescue ISO against the committed signing key, unsquashes its
-root, chroots in with `chroot.sh`, and repacks. Everything comes from
-SystemRescue's archive snapshot, never rolling Arch. `chroot.sh` checks each
+root, chroots in with `chroot.sh`, and repacks. Every pacman package comes from
+SystemRescue's archive snapshot, never rolling Arch (bun and Claude Code come
+from their own releases). `chroot.sh` checks each
 SystemRescue file before editing it, so a new release that moved something stops
 the build — fix the check, don't loosen it. The image clones the toolbox commit
 being built, so commit before `docker-build.sh`. The smoke check lives in the
