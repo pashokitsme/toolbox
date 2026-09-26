@@ -194,6 +194,11 @@ for pkg in "$REPO"/lib/*/package.json; do
 	[ -e "$pkg" ] || continue
 	dir="$(dirname "$pkg")"
 	name="$(basename "$dir")"
+	# Raycast exists only on macOS; elsewhere its extension is dead weight
+	if [ "$name" = raycast ] && [ "$(uname -s)" != Darwin ]; then
+		say "  skip     raycast (Raycast is macOS-only)"
+		continue
+	fi
 	if command -v bun >/dev/null 2>&1; then
 		say "installing $name dependencies with bun"
 		if [ "$DRY_RUN" = 1 ]; then

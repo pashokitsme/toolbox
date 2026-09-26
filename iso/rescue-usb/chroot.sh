@@ -57,6 +57,10 @@ mapfile -t packages < <(grep -v '^\s*\(#\|$\)' "$packages_file")
 pacman "${pacman_opts[@]}" -Sy --noconfirm
 pacman "${pacman_opts[@]}" -S --needed --noconfirm "${packages[@]}"
 
+say "helix answers to hx, as on the Mac (Arch names the binary helix)"
+[ -x /usr/bin/helix ] || die "/usr/bin/helix is missing"
+ln -sf /usr/bin/helix /usr/local/bin/hx
+
 say "services"
 systemctl enable tailscaled.service rescue-usb-smoke.service
 
