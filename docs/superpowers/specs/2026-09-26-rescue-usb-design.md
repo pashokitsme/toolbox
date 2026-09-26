@@ -120,7 +120,9 @@ All of them are in `extra`, and all were present in the archive snapshot of
 
 ### sysrescue.d/500-toolbox.yaml
 
-`rootshell: /bin/zsh`, `dostartx: true`, keyboard layouts us + ru.
+`rootshell: /bin/zsh`, `dostartx: true`. Keyboard layouts us + ru (Super+Space
+toggles) come from `rootfs/etc/X11/xorg.conf.d/00-keyboard.conf`, since
+SystemRescue's `setkmap` only sets the console keymap.
 
 ## Toolbox changes that come with this
 
