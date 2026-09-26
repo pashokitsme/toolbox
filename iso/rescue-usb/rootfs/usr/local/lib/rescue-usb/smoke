@@ -49,6 +49,7 @@ cfg_err=$(ghostty +validate-config 2>&1) || bad "ghostty config: $cfg_err"
 [ "$(zsh -i -c 'for f in $precmd_functions; do $f; done; print -r -- $PS1' 2>/dev/null | grep -c 'starship prompt')" = 1 ] ||
 	bad "zsh prompt is not starship's"
 [ "$(zsh -i -c 'print -r -- ${REPORTTIME-unset}' 2>/dev/null)" = unset ] || bad "zsh still reports command times (REPORTTIME)"
+[ "$(zsh -i -c '[[ -o correct || -o correctall ]] && print on' 2>/dev/null)" != on ] || bad "zsh still offers spelling corrections"
 
 grep -q '^TerminalEmulator=custom-TerminalEmulator$' /root/.config/xfce4/helpers.rc ||
 	bad "XFCE terminal is not rescue-terminal"
