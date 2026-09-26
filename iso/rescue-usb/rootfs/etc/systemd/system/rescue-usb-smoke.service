@@ -1,0 +1,16 @@
+[Unit]
+Description=rescue-usb smoke check (only with rescue_usb_smoke=1)
+ConditionKernelCommandLine=rescue_usb_smoke=1
+After=sysrescue-initialize-whilenet.service tailscaled.service iptables.service ip6tables.service
+Wants=tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/rescue-usb/smoke
+ExecStopPost=/usr/bin/systemctl poweroff --no-block
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/ttyS0
+
+[Install]
+WantedBy=multi-user.target

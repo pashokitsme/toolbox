@@ -1,0 +1,4 @@
+#!/bin/sh
+# The terminal XFCE opens: ghostty, or xfce4-terminal when ghostty cannot start
+# (no usable OpenGL — old GPUs, some virtual machines).
+ghostty "$@" || exec xfce4-terminal "$@"

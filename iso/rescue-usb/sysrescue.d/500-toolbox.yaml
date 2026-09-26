@@ -1,0 +1,5 @@
+---
+# rescue-usb: zsh for root and straight into XFCE on tty1
+global:
+    rootshell: "/bin/zsh"
+    dostartx: true

@@ -1,0 +1,42 @@
+# Packages rescue-usb adds on top of SystemRescue, one per line.
+# They come from SystemRescue's archive snapshot, so every one of them must
+# exist in Arch's repositories on that SystemRescue release's date.
+
+# network
+tailscale
+wireshark-cli
+nethogs
+arp-scan
+lldpd
+mosh
+
+# disks
+fio
+gdu
+
+# everyday
+ghostty
+helix
+zellij
+yazi
+starship
+btop
+fzf
+ripgrep
+fd
+bat
+eza
+git-delta
+github-cli
+glab
+bun
+jq
+ttf-jetbrains-mono-nerd
+
+# what config/zsh/zshrc uses
+zsh-syntax-highlighting
+zsh-autosuggestions
+zoxide
+lazygit
+ffmpeg
+imagemagick
