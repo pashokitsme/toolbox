@@ -53,6 +53,14 @@ rolling=/etc/pacman.d/mirrorlist
 mv "$rolling.new" "$rolling"
 
 say "installing packages"
+# SystemRescue downloads through curl (XferCommand), whose progress meter fills
+# a build log with hundreds of lines; the build uses a copy of pacman.conf with
+# a quiet curl, and the image keeps the meter — it is pacman's only progress bar
+quiet_conf=/var/tmp/rescue-usb/pacman-quiet.conf
+sed 's|^\(XferCommand = .*/curl\) |\1 --silent --show-error |' /etc/pacman.conf >"$quiet_conf"
+grep -q '^XferCommand = .*/curl --silent --show-error ' "$quiet_conf" ||
+	die "/etc/pacman.conf: no curl XferCommand to quiet down"
+pacman_opts+=(--config "$quiet_conf")
 mapfile -t packages < <(grep -v '^\s*\(#\|$\)' "$packages_file")
 pacman "${pacman_opts[@]}" -Sy --noconfirm
 # --ask 4 says yes to replacing a conflicting package (mesa-minimal by mesa),
