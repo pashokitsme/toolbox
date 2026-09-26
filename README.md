@@ -55,7 +55,7 @@ so Claude picks it up in every project.
 
 | | |
 |---|---|
-| `iso/rescue-usb` | SystemRescue for the Ventoy stick with my packages, this toolbox, tailscale and Claude Code baked in. `docker-build.sh` builds it on the Mac, `qemu.sh` boots it; the `rescue-usb` workflow (run by hand) builds and smoke-tests it and leaves the ISO as an artifact. |
+| `iso/rescue-usb` | SystemRescue for the Ventoy stick with my packages, this toolbox, tailscale and Claude Code baked in. A guide to its tools by situation sits on its desktop (`guide` in a terminal), and its Claude Code reads it too. `docker-build.sh` builds it on the Mac, `qemu.sh` boots it; the `rescue-usb` workflow (run by hand) builds and smoke-tests it and leaves the ISO as an artifact. |
 
 ## Raycast
 

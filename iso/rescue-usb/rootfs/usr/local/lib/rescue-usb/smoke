@@ -52,6 +52,10 @@ cfg_err=$(ghostty +validate-config 2>&1) || bad "ghostty config: $cfg_err"
 [ "$(zsh -i -c '[[ -o correct || -o correctall ]] && print on' 2>/dev/null)" != on ] || bad "zsh still offers spelling corrections"
 
 [ "$(stat -c %a /root)" = 750 ] || bad "/root is $(stat -c %a /root), SystemRescue has 750"
+[ -s /root/Desktop/guide.md ] || bad "guide.md missing from the desktop"
+command -v guide >/dev/null || bad "guide command missing"
+grep -q "^@/root/Desktop/guide.md$" /root/.claude/CLAUDE.md 2>/dev/null || bad "Claude's CLAUDE.md does not pull in the guide"
+command -v os-prober >/dev/null || bad "os-prober missing"
 command -v glxinfo >/dev/null || bad "glxinfo missing (rescue-terminal asks it for the OpenGL version)"
 
 grep -q '^TerminalEmulator=custom-TerminalEmulator$' /root/.config/xfce4/helpers.rc ||

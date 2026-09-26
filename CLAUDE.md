@@ -110,3 +110,6 @@ mounts its own `/tmp`. SystemRescue's quirks the image works around: its
 zshrc is grml's, whose prompt `config/zsh/zshrc` switches off for starship, Arch
 names helix `helix` (the image links `hx`), and Arch's bun needs AVX2 (the image
 takes bun's baseline build). `install.sh` skips `lib/raycast` off macOS.
+`rootfs/root/Desktop/guide.md` is the situation-by-situation guide to the image's
+tools (Russian); `rootfs/root/.claude/CLAUDE.md` imports it for Claude Code on
+the stick. Check a command against the built image before putting it there.

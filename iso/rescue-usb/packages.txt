@@ -20,6 +20,8 @@ mesa-utils
 # disks
 fio
 gdu
+# lets grub-mkconfig in a chroot find Windows (guide, section 2.3)
+os-prober
 
 # everyday
 ghostty
