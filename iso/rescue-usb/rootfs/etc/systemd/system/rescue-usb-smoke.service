@@ -8,9 +8,10 @@ Wants=tailscaled.service
 Type=oneshot
 ExecStart=/usr/local/lib/rescue-usb/smoke
 ExecStopPost=/usr/bin/systemctl poweroff --no-block
-StandardOutput=tty
-StandardError=tty
-TTYPath=/dev/ttyS0
+# the kernel console is ttyS0 when qemu.sh boots it (last console=); writing to
+# ttyS0 directly loses the output to SystemRescue's serial autologin
+StandardOutput=journal+console
+StandardError=journal+console
 
 [Install]
 WantedBy=multi-user.target
