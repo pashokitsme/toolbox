@@ -51,6 +51,9 @@ cfg_err=$(ghostty +validate-config 2>&1) || bad "ghostty config: $cfg_err"
 [ "$(zsh -i -c 'print -r -- ${REPORTTIME-unset}' 2>/dev/null)" = unset ] || bad "zsh still reports command times (REPORTTIME)"
 [ "$(zsh -i -c '[[ -o correct || -o correctall ]] && print on' 2>/dev/null)" != on ] || bad "zsh still offers spelling corrections"
 
+[ "$(stat -c %a /root)" = 750 ] || bad "/root is $(stat -c %a /root), SystemRescue has 750"
+command -v glxinfo >/dev/null || bad "glxinfo missing (rescue-terminal asks it for the OpenGL version)"
+
 grep -q '^TerminalEmulator=custom-TerminalEmulator$' /root/.config/xfce4/helpers.rc ||
 	bad "XFCE terminal is not rescue-terminal"
 grep -q 'startx' /root/.zlogin 2>/dev/null || bad "X does not start on tty1 (dostartx)"

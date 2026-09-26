@@ -1,4 +1,16 @@
 #!/bin/sh
-# The terminal XFCE opens: ghostty, or xfce4-terminal when ghostty cannot start
-# (no usable OpenGL — old GPUs, some virtual machines).
-ghostty "$@" || exec xfce4-terminal "$@"
+# The terminal XFCE opens: ghostty. It needs OpenGL 4.3, and when the driver
+# offers less (old GPUs, no GPU driver at all) it shows an error window instead
+# of failing — so the driver is asked first, and if it falls short ghostty draws
+# through Mesa's software renderer (llvmpipe) instead.
+#   rescue-terminal                a shell
+#   rescue-terminal -e "COMMAND"   COMMAND through sh -c — exo hands the whole
+#                                  command line over as one argument
+gl=$(glxinfo -B 2>/dev/null | sed -n 's/^OpenGL core profile version string: \([0-9]*\)\.\([0-9]\).*/\1\2/p')
+if [ "${gl:-0}" -lt 43 ]; then
+	export LIBGL_ALWAYS_SOFTWARE=1
+fi
+if [ "${1:-}" = -e ] && [ $# -ge 2 ]; then
+	exec ghostty -e sh -c "$2"
+fi
+exec ghostty "$@"

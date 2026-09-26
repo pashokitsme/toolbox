@@ -15,6 +15,7 @@
 # (systemrescue-signing-key.pem, primary 0FF11AF0…8320B897), or nothing is built.
 # The toolbox baked into the image is the commit checked out here, so commit first.
 set -euo pipefail
+shopt -s inherit_errexit # fetch_verified runs inside $(…)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-/work}"
@@ -39,6 +40,12 @@ fi
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
+# download URL DEST — DEST appears only once the download is complete
+download() {
+	curl -fsSL --retry 3 -o "$2.part" "$1" || { rm -f "$2.part"; die "download failed: $1"; }
+	mv "$2.part" "$2"
+}
+
 latest_version() {
 	curl -fsSL "$TAGS_API" | jq -r '.[].name' | grep -E '^[0-9]+\.[0-9]+$' | sort -V | tail -1
 }
@@ -49,11 +56,10 @@ fetch_verified() {
 	mkdir -p "$dir"
 	if [ ! -s "$dir/$iso" ]; then
 		say "downloading $iso" >&2
-		curl -fsSL --retry 3 -o "$dir/$iso.part" "$CDN/$ver/$iso"
-		mv "$dir/$iso.part" "$dir/$iso"
+		download "$CDN/$ver/$iso" "$dir/$iso"
 	fi
-	curl -fsSL -o "$dir/$iso.sha512" "$CDN/$ver/$iso.sha512"
-	curl -fsSL -o "$dir/$iso.asc" "$CDN/$ver/$iso.asc"
+	download "$CDN/$ver/$iso.sha512" "$dir/$iso.sha512"
+	download "$CDN/$ver/$iso.asc" "$dir/$iso.asc"
 	(cd "$dir" && sha512sum --quiet -c "$iso.sha512") >&2 ||
 		die "$dir/$iso does not match its sha512 — delete it to download again"
 	local gnupg status
@@ -85,12 +91,16 @@ main() {
 	[ -n "$ver" ] || ver=$(latest_version) || true
 	[ -n "$ver" ] || die "could not find the newest SystemRescue version ($TAGS_API)"
 	say "SystemRescue $ver"
+	local out
+	out="$OUT/rescue-usb-$ver-$(date -u +%F).iso"
+	# an ISO of today's name from an earlier run must not outlive a failed build
+	[ -n "$verify_only" ] || rm -f "$out" "$out.part"
 	local iso
 	iso=$(fetch_verified "$ver")
 	[ -z "$verify_only" ] || return 0
 
 	local build="$WORK/build" customize="$WORK/sysrescue-customize-$ver"
-	[ -s "$customize" ] || curl -fsSL -o "$customize" "$SOURCES/-/raw/$ver/airootfs/usr/share/sysrescue/bin/sysrescue-customize"
+	[ -s "$customize" ] || download "$SOURCES/-/raw/$ver/airootfs/usr/share/sysrescue/bin/sysrescue-customize" "$customize"
 	rm -rf "$build"
 	mkdir -p "$build"
 	bash "$customize" --unpack -s "$iso" -d "$build/iso"
@@ -103,7 +113,8 @@ main() {
 	unsquashfs -q -d "$ROOT" "$sfs"
 
 	say "overlaying rootfs/ and the toolbox checkout"
-	rsync -a --chown=root:root "$HERE/rootfs/" "$ROOT/"
+	# --no-perms: directories SystemRescue already has keep their mode (/root is 0750)
+	rsync -a --no-perms --chown=root:root "$HERE/rootfs/" "$ROOT/"
 	local repo
 	repo=$(git -c safe.directory='*' -C "$HERE" rev-parse --show-toplevel)
 	git -c safe.directory='*' clone --quiet --no-local "$repo" "$ROOT/root/toolbox"
@@ -127,10 +138,8 @@ main() {
 
 	install -m 0644 "$HERE"/sysrescue.d/*.yaml "$build/iso/filesystem/sysrescue.d/"
 	mkdir -p "$OUT"
-	local out
-	out="$OUT/rescue-usb-$ver-$(date +%F).iso"
-	rm -f "$out"
-	bash "$customize" --rebuild -s "$build/iso" -d "$out"
+	bash "$customize" --rebuild -s "$build/iso" -d "$out.part"
+	mv "$out.part" "$out"
 	rm -rf "$build"
 	say "done: $out"
 }

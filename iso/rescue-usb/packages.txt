@@ -14,6 +14,8 @@ mosh
 # graphics: SystemRescue's mesa-minimal has no OpenGL drivers at all, and
 # ghostty cannot draw without them (chroot.sh lets mesa replace it)
 mesa
+# glxinfo: rescue-terminal checks the OpenGL version before starting ghostty
+mesa-utils
 
 # disks
 fio
