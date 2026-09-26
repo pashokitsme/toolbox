@@ -14,10 +14,12 @@ say() { printf '  -> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 say "pacman: archive snapshot only"
+# every server must be a dated Arch Linux Archive path (…/repos/YYYY/MM/DD/…);
+# SystemRescue lists archive.archlinux.org and its mirrors
 servers=$(pacman-conf --repo=extra Server)
 [ -n "$servers" ] || die "pacman has no server for [extra]"
-if grep -qv '^https://archive.archlinux.org/repos/' <<<"$servers"; then
-	die "pacman does not point at the archive snapshot: $servers"
+if grep -qvE '^https://[^/]+/repos/[0-9]{4}/[0-9]{2}/[0-9]{2}/' <<<"$servers"; then
+	die "pacman does not point at a dated archive snapshot: $servers"
 fi
 
 say "installing packages"
