@@ -108,14 +108,16 @@ main() {
 	repo=$(git -c safe.directory='*' -C "$HERE" rev-parse --show-toplevel)
 	git -c safe.directory='*' clone --quiet --no-local "$repo" "$ROOT/root/toolbox"
 	git -C "$ROOT/root/toolbox" remote set-url origin https://github.com/pashokitsme/toolbox
-	install -m 0644 "$HERE/packages.txt" "$ROOT/tmp/rescue-usb-packages.txt"
-	install -m 0755 "$HERE/chroot.sh" "$ROOT/tmp/rescue-usb-chroot.sh"
+	# not /tmp: arch-chroot mounts a fresh tmpfs over it
+	local stage=/var/tmp/rescue-usb
+	install -D -m 0644 "$HERE/packages.txt" "$ROOT$stage/packages.txt"
+	install -D -m 0755 "$HERE/chroot.sh" "$ROOT$stage/chroot.sh"
 
 	say "customizing inside the image"
 	mount --bind "$ROOT" "$ROOT"
-	arch-chroot "$ROOT" /tmp/rescue-usb-chroot.sh /tmp/rescue-usb-packages.txt "${PACMAN_OPTS[@]}"
+	arch-chroot "$ROOT" "$stage/chroot.sh" "$stage/packages.txt" "${PACMAN_OPTS[@]}"
 	umount -R "$ROOT"
-	rm -f "$ROOT"/tmp/rescue-usb-*
+	rm -rf "${ROOT:?}$stage"
 
 	say "repacking the root filesystem (${SFS_OPTS[*]})"
 	rm "$sfs"
