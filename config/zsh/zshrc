@@ -1,0 +1,73 @@
+# Shell setup shared by every machine. The Mac sources it from ~/.zshrc, which
+# keeps what must not be in a public repository (tokens, work variables) and
+# what only exists there (Homebrew, Xcode, emsdk); the rescue-usb image makes it
+# root's whole ~/.zshrc. A missing tool is skipped, never an error at shell start.
+
+case "$OSTYPE" in
+	darwin*) __zsh_plugins=/opt/homebrew/share
+		fpath=($fpath /opt/homebrew/share/zsh/site-functions/) ;;
+	*) __zsh_plugins=/usr/share/zsh/plugins ;;
+esac
+
+autoload -Uz compinit && compinit
+zstyle ':completion::complete:*' use-cache 1
+export ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#757575'
+
+bindkey "^[[1;3D" backward-word   # cmd+← / alt+←
+bindkey "^[[1;3C" forward-word    # cmd+→ / alt+→
+
+path=("$HOME/.local/bin" "$HOME/.bun/bin" $path)
+typeset -U path
+
+(( $+commands[ccp] )) && eval "$(ccp --shell-init)"
+
+# aliases — the ones that shadow a standard command only when the replacement exists
+(( $+commands[eza] )) && alias ls="eza -A -s type"
+(( $+commands[bat] )) && alias cat="bat -p"
+(( $+commands[rg] )) && alias grep="rg"
+(( $+commands[lazygit] )) && alias lg="lazygit"
+(( $+commands[bun] )) && alias npm="bun"
+alias cls="clear"
+alias clear="clear && printf '\033[3J'"
+alias rmf="rm -rf"
+alias claude="claude --allow-dangerously-skip-permissions --dangerously-skip-permissions"
+
+[ -r "$__zsh_plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ] &&
+	source "$__zsh_plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+# grml-zsh-config (the global zshrc on SystemRescue and the Arch ISO) redraws its
+# own prompt before every command; switch its prompt theme off so starship's stays
+(( $+commands[starship] )) && (( $+functions[prompt] )) && prompt off
+# grml also reports the run time of every command over 5 s and offers spelling
+# corrections; the Mac never did either
+unset REPORTTIME
+unsetopt correct correct_all
+(( $+commands[starship] )) && source <(starship init zsh --print-full-init)
+if (( $+commands[zoxide] )); then
+	eval "$(zoxide init zsh)"
+	alias cd="z"
+fi
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
+[ -r "$__zsh_plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" ] &&
+	source "$__zsh_plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
+unset __zsh_plugins
+
+export _ZO_DOCTOR=0
+export EDITOR=hx
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
+function reload() {
+	source ~/.zshrc
+}
+
+function ffmpeg-compress() {
+	ffmpeg -i $1 -c:v libx264 -crf 23 -preset fast -c:a aac -b:a 128k $2
+}
+
+function magick-compress() {
+	magick $1 -strip -interlace Plane -gaussian-blur 0.05 -quality 85% $2
+}
+
+function rustfmt-init() {
+	cp ~/.config/rustfmt.toml .
+}

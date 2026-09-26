@@ -14,6 +14,7 @@ installed tool, config or skill changes with it.
 ./install.sh --config-dir DIR   # link configs into DIR instead of ~/.config
 ./install.sh --no-config        # tools only, leave ~/.config alone
 ./install.sh --no-skills        # leave ~/.claude/skills alone
+./install.sh --no-adoc          # skip adoc and its agent skill
 ```
 
 ## Tools
@@ -33,9 +34,13 @@ installed tool, config or skill changes with it.
 ## Configs
 
 Every entry of `config/` is linked into `~/.config` under the same name —
-`ghostty`, `helix` and `zellij` as whole directories (so files an application
-writes into its own directory land in this checkout), `starship.toml` and
-`mcz.toml` as single files.
+`ghostty`, `helix`, `zellij` and `zsh` as whole directories (so files an
+application writes into its own directory land in this checkout),
+`starship.toml` and `mcz.toml` as single files.
+
+`config/zsh/zshrc` is the half of the shell setup every machine shares — the
+Mac's own `~/.zshrc` (tokens, Homebrew, work variables) sources it, and so does
+the rescue image.
 
 ## Skills
 
@@ -45,6 +50,12 @@ so Claude picks it up in every project.
 | | |
 |---|---|
 | `obscura` | When to use the obscura headless browser and `ofetch` over `WebFetch`, `WebSearch` or Playwright, which of the 37 `browser_*` MCP tools to reach for and which of them are quietly broken, and the places obscura's own docs disagree with the shipped binary. |
+
+## Images
+
+| | |
+|---|---|
+| `iso/rescue-usb` | SystemRescue for the Ventoy stick with my packages, this toolbox, tailscale and Claude Code baked in. A guide to its tools by situation sits on its desktop (`guide` in a terminal), and its Claude Code reads it too. `docker-build.sh` builds it on the Mac, `qemu.sh` boots it; the `rescue-usb` workflow (run by hand) builds and smoke-tests it and leaves the ISO as an artifact. |
 
 ## Raycast
 

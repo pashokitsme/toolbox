@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# rescue-usb smoke check: what the image adds on top of SystemRescue is there
+# and works. One line per failure, then "SMOKE OK" or "SMOKE FAILED (<n>)".
+# Runs at boot with rescue_usb_smoke=1 (rescue-usb-smoke.service); safe to run by hand.
+set -u
+export HOME=/root TERM=xterm-256color
+export PATH="/root/.local/bin:/root/.bun/bin:$PATH"
+failed=0
+bad() { echo "FAIL $*"; failed=$((failed + 1)); }
+
+for c in tailscale tailscaled tshark nethogs arp-scan lldpd mosh fio gdu \
+	trip gping bandwhich nload termshark wavemon fping ipcalc nbtscan snmpwalk testssl ngrep \
+	ghostty hx zellij yazi starship btop fzf rg fd bat eza delta gh glab bun jq \
+	zoxide lazygit ffmpeg magick claude ccp glab-mrs glmr git-ai-commit; do
+	command -v "$c" >/dev/null || bad "command missing: $c"
+done
+
+systemctl is-active --quiet tailscaled || bad "tailscaled is not running"
+iptables -S INPUT | grep -q -- '-i tailscale0 -j ACCEPT' || bad "iptables: tailscale0 not accepted"
+ip6tables -S INPUT | grep -q -- '-i tailscale0 -j ACCEPT' || bad "ip6tables: tailscale0 not accepted"
+
+grep -q '^Server = https://mirror.surf/archlinux-archive/repos/' /etc/pacman.d/mirrorlist-snapshot ||
+	bad "snapshot mirrorlist lacks mirror.surf"
+grep -q '^Server = https://mirror.yandex.ru/archlinux/' /etc/pacman.d/mirrorlist ||
+	bad "rolling mirrorlist lacks the Russian mirrors"
+bun --version >/dev/null 2>&1 || bad "bun does not run"
+
+# the sync databases are in the image: a package SystemRescue does not ship resolves without -Sy
+pacman -Si nginx >/dev/null 2>&1 || bad "pacman sync database missing"
+
+[ "$(git -C /root/toolbox remote get-url origin 2>/dev/null)" = https://github.com/pashokitsme/toolbox ] ||
+	bad "/root/toolbox is not a toolbox clone"
+claude --version >/dev/null 2>&1 || bad "claude does not run"
+
+[ "$(getent passwd root | cut -d: -f7)" = /bin/zsh ] || bad "root shell is not zsh"
+[ "$(zsh -c 'echo $IS_SANDBOX')" = 1 ] || bad "IS_SANDBOX is not set for root"
+err=$(zsh -i -c exit 2>&1 >/dev/null)
+[ -z "$err" ] || bad "zsh -i prints on stderr: $err"
+aliases=$(zsh -i -c 'alias cd ls cat grep lg' 2>/dev/null)
+for want in "cd=z" "ls='eza -A -s type'" "cat='bat -p'" "grep=rg" "lg=lazygit"; do
+	grep -qxF "$want" <<<"$aliases" || bad "zsh alias missing: $want"
+done
+[ "$(zsh -i -c 'whence -w ccp' 2>/dev/null)" = "ccp: function" ] || bad "ccp shell function missing"
+
+# ghostty needs real OpenGL drivers: SystemRescue's mesa-minimal ships none at all
+pacman -Q mesa >/dev/null 2>&1 || bad "mesa is not installed (mesa-minimal has no OpenGL drivers)"
+cfg_err=$(ghostty +validate-config 2>&1) || bad "ghostty config: $cfg_err"
+[ -z "$cfg_err" ] || bad "ghostty config: $cfg_err"
+# grml's global zshrc redraws its prompt in precmd, so look after the precmd hooks ran
+[ "$(zsh -i -c 'for f in $precmd_functions; do $f; done; print -r -- $PS1' 2>/dev/null | grep -c 'starship prompt')" = 1 ] ||
+	bad "zsh prompt is not starship's"
+[ "$(zsh -i -c 'print -r -- ${REPORTTIME-unset}' 2>/dev/null)" = unset ] || bad "zsh still reports command times (REPORTTIME)"
+[ "$(zsh -i -c '[[ -o correct || -o correctall ]] && print on' 2>/dev/null)" != on ] || bad "zsh still offers spelling corrections"
+
+[ "$(stat -c %a /root)" = 750 ] || bad "/root is $(stat -c %a /root), SystemRescue has 750"
+[ -s /root/Desktop/guide.md ] || bad "guide.md missing from the desktop"
+command -v guide >/dev/null || bad "guide command missing"
+grep -q "^@/root/Desktop/guide.md$" /root/.claude/CLAUDE.md 2>/dev/null || bad "Claude's CLAUDE.md does not pull in the guide"
+command -v os-prober >/dev/null || bad "os-prober missing"
+command -v glxinfo >/dev/null || bad "glxinfo missing (rescue-terminal asks it for the OpenGL version)"
+
+grep -q '^TerminalEmulator=custom-TerminalEmulator$' /root/.config/xfce4/helpers.rc ||
+	bad "XFCE terminal is not rescue-terminal"
+grep -q 'startx' /root/.zlogin 2>/dev/null || bad "X does not start on tty1 (dostartx)"
+
+if [ "$failed" = 0 ]; then echo "SMOKE OK"; else echo "SMOKE FAILED ($failed)"; exit 1; fi

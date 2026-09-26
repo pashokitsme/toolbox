@@ -1,0 +1,8 @@
+#!/bin/sh
+# Opens the rescue guide — what happened, what to look at, what to fix with —
+# which also sits on the XFCE desktop as guide.md.
+f=/root/Desktop/guide.md
+if command -v bat >/dev/null; then
+	exec bat --paging=always --style=plain --language=markdown "$f"
+fi
+exec less "$f"

@@ -1,0 +1,62 @@
+# Packages rescue-usb adds on top of SystemRescue, one per line.
+# They come from SystemRescue's archive snapshot, so every one of them must
+# exist in Arch's repositories on that SystemRescue release's date.
+# (bun is not here: chroot.sh installs its baseline build, which needs no AVX2.)
+
+# network
+tailscale
+wireshark-cli
+nethogs
+arp-scan
+lldpd
+mosh
+trippy
+gping
+bandwhich
+nload
+termshark
+wavemon
+fping
+ipcalc
+nbtscan
+net-snmp
+testssl.sh
+ngrep
+
+# graphics: SystemRescue's mesa-minimal has no OpenGL drivers at all, and
+# ghostty cannot draw without them (chroot.sh lets mesa replace it)
+mesa
+# glxinfo: rescue-terminal checks the OpenGL version before starting ghostty
+mesa-utils
+
+# disks
+fio
+gdu
+# lets grub-mkconfig in a chroot find Windows (guide, section 2.3)
+os-prober
+
+# everyday
+ghostty
+helix
+zellij
+yazi
+starship
+btop
+fzf
+ripgrep
+fd
+bat
+eza
+git-delta
+github-cli
+glab
+jq
+ttf-jetbrains-mono-nerd
+
+# what config/zsh/zshrc uses
+zsh-syntax-highlighting
+zsh-autosuggestions
+zoxide
+lazygit
+ffmpeg
+imagemagick
