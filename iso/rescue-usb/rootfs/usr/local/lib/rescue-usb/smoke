@@ -9,6 +9,7 @@ failed=0
 bad() { echo "FAIL $*"; failed=$((failed + 1)); }
 
 for c in tailscale tailscaled tshark nethogs arp-scan lldpd mosh fio gdu \
+	trip gping bandwhich nload termshark wavemon fping ipcalc nbtscan snmpwalk testssl ngrep \
 	ghostty hx zellij yazi starship btop fzf rg fd bat eza delta gh glab bun jq \
 	zoxide lazygit ffmpeg magick claude ccp glab-mrs glmr git-ai-commit; do
 	command -v "$c" >/dev/null || bad "command missing: $c"

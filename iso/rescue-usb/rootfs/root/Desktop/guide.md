@@ -211,24 +211,32 @@ ddrescue -d -r3 /dev/sdX /mnt/big/disk.img /mnt/big/disk.map   # потом до
 | Слой | Проверка |
 |---|---|
 | Кабель и линк | `ethtool eth0`: `Link detected`, `Speed`, `Duplex`. 100 Мбит/с на гигабитном порту обычно означает плохой кабель |
-| Wi-Fi | `iw dev wlan0 link` (сигнал, скорость), `nmcli dev wifi list` |
+| Wi-Fi | `iw dev wlan0 link` (сигнал, скорость), `nmcli dev wifi list`; `wavemon` — сигнал и шум вживую, удобно ходить с ноутом и искать мёртвые зоны |
 | Адрес по DHCP | есть ли адрес в `ip -br a`; в чём дело: `tcpdump -ni eth0 port 67 or port 68` |
 | Шлюз | `ping -c3 $(ip r \| awk '/default/{print $3; exit}')` |
 | Интернет по IP | `ping -c3 1.1.1.1` |
 | DNS | `dig ya.ru`, затем `dig ya.ru @1.1.1.1`: второй работает, а первый нет — значит, виноват DNS роутера или провайдера |
-| Где теряются пакеты | `mtr -rwzbc 50 ya.ru` |
-| HTTPS, сертификаты, прокси | `curl -v https://ya.ru` |
+| Где теряются пакеты | `trip ya.ru` (TUI: хопы, потери, задержки) или `mtr -rwzbc 50 ya.ru`; нестабильность во времени — `gping ya.ru 1.1.1.1 <шлюз>` |
+| HTTPS, сертификаты, прокси | `curl -v https://ya.ru`; сервер целиком (протоколы, шифры, цепочка) — `testssl ya.ru` |
 | Скорость до интернета | `speedtest-cli` |
-| Скорость внутри сети | `iperf3 -s` на одной машине, `iperf3 -c <ip>` на другой |
+| Скорость внутри сети | `iperf3 -s` на одной машине, `iperf3 -c <ip>` на другой; сколько идёт через интерфейс прямо сейчас — `nload` |
+| Адреса и маски | `ipcalc 192.168.1.10/22` — сеть, broadcast, диапазон хостов |
 
 ### 7.3. Кто есть в сети и кто её грузит
 
-- Устройства в сегменте: `arp-scan -l` или `nmap -sn 192.168.1.0/24`.
+- Устройства в сегменте: `arp-scan -l` или `nmap -sn 192.168.1.0/24`; живы ли
+  хосты из списка — `fping -a -g 192.168.1.0/24` или `fping < hosts.txt`.
+- Имена Windows-машин: `nbtscan 192.168.1.0/24`.
+- Свитчи, принтеры, UPS по SNMP: `snmpwalk -v2c -c public <ip>` (дальше —
+  `snmpwalk … IF-MIB::ifOperStatus` для портов).
 - Порты и сервисы на хосте: `nmap -sV <ip>`.
 - В какой порт какого свитча воткнут кабель: `systemctl start lldpd`, подождать
   минуту, затем `lldpcli show neighbors`.
-- Кто съедает канал: `nethogs` (по процессам), `iftop` (по соединениям).
-- Смотреть трафик: `tcpdump -ni eth0 host <ip>` или `tshark -i eth0 -f 'port 53'`.
+- Кто съедает канал: `bandwhich` (процессы, соединения и адреса разом), `nethogs`
+  (по процессам), `iftop` (по соединениям).
+- Смотреть трафик: `tcpdump -ni eth0 host <ip>` или `tshark -i eth0 -f 'port 53'`;
+  с разбором пакетов, как в Wireshark, но в терминале — `termshark -i eth0`;
+  искать строку в содержимом — `ngrep -d eth0 -q 'Host:' port 80`.
 
 ## 8. Удалённая помощь
 
