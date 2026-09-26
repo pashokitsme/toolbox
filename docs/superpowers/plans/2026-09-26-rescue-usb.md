@@ -33,14 +33,46 @@
 
 ---
 
-### Task 1: `install.sh` survives a failing adoc install
+### Task 1: `install.sh --no-adoc`, and a failing adoc install is a warning
+
+(The user: adoc is not needed in the image. `--no-adoc` skips both the bun install and the skill; the gh fix stays because it was asked for separately.)
 
 **Files:**
-- Modify: `install.sh:211-225`
+- Modify: `install.sh` (header options list, `usage` line range, option parsing, the adoc block)
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `install.sh` exits 0 when `bun install -g …adoc` or `gh skill install …` fail, printing a `  warn     …` line. `chroot.sh` (Task 4) relies on this — the image has `gh` without a login.
+- Produces: `install.sh --no-adoc` touches neither `bun install -g …adoc` nor `gh skill install …adoc` (`chroot.sh`, Task 4, calls `./install.sh --no-adoc`); without the flag, a failure of either prints a `  warn     …` line and the run still exits 0.
+
+Second test, `$SCRATCH/test-install-noadoc.sh`, with a fake `bun` that records its arguments and a PATH without the real `~/.bun/bin` (so `adoc` is not found and the install branch is reached):
+
+```bash
+#!/usr/bin/env bash
+# --no-adoc must not try to install adoc or its skill; without it, it must.
+set -u
+t=$(mktemp -d); mkdir -p "$t/fakebin"
+printf '#!/bin/sh
+echo "$*" >>%s/bun.calls
+' "$t" >"$t/fakebin/bun"
+printf '#!/bin/sh
+echo "$*" >>%s/gh.calls
+' "$t" >"$t/fakebin/gh"
+chmod +x "$t/fakebin/"*
+run() { PATH="$t/fakebin:/usr/bin:/bin" /Users/pavel.smirnov/Source/repos/toolbox/install.sh \
+	--prefix "$t/prefix" --config-dir "$t/config" --skills-dir "$t/skills" "$@" >"$t/log" 2>&1; }
+run; code1=$?
+with=$(cat "$t/bun.calls" "$t/gh.calls" 2>/dev/null | grep -c adoc)
+rm -f "$t/bun.calls" "$t/gh.calls"
+run --no-adoc; code2=$?
+without=$(cat "$t/bun.calls" "$t/gh.calls" 2>/dev/null | grep -c adoc)
+echo "plain: exit=$code1 adoc-calls=$with; --no-adoc: exit=$code2 adoc-calls=$without"
+rm -rf "$t"
+[ "$code1" = 0 ] && [ "$with" = 2 ] && [ "$code2" = 0 ] && [ "$without" = 0 ]
+```
+
+RED expectation: `--no-adoc` is an unknown option → `exit=2`. GREEN: `plain: exit=0 adoc-calls=2; --no-adoc: exit=0 adoc-calls=0`.
+
+Implementation: header line `#       --no-adoc        Skip installing adoc and its agent skill` after `--no-skills`; `usage` prints `2,25p`; `WITH_ADOC=1` default, `--no-adoc) WITH_ADOC=0 ;;`; the adoc block becomes `if [ "$WITH_ADOC" = 0 ]; then :; elif command -v adoc …` and the skill condition gains `[ "$WITH_ADOC" = 1 ] &&`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -452,7 +484,7 @@ bad() { echo "FAIL $*"; failed=$((failed + 1)); }
 
 for c in tailscale tailscaled tshark nethogs arp-scan lldpd mosh fio gdu \
 	ghostty hx zellij starship btop fzf rg fd bat eza delta gh glab bun jq \
-	zoxide lazygit ffmpeg magick claude ccp glab-mrs glmr git-ai-commit adoc; do
+	zoxide lazygit ffmpeg magick claude ccp glab-mrs glmr git-ai-commit; do
 	command -v "$c" >/dev/null || bad "command missing: $c"
 done
 
@@ -725,7 +757,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 /root/.local/bin/claude --version
 
 say "toolbox"
-(cd /root/toolbox && PATH="/root/.local/bin:/root/.bun/bin:$PATH" ./install.sh)
+(cd /root/toolbox && PATH="/root/.local/bin:/root/.bun/bin:$PATH" ./install.sh --no-adoc)
 
 say "cleaning caches (package databases stay)"
 rm -rf /var/cache/pacman/pkg/* /root/.cache /root/.bun/install/cache
