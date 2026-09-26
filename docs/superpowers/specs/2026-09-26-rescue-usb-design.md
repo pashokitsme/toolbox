@@ -54,25 +54,41 @@ iso/rescue-usb/
    signing subkey `62989046EB5C7E985ECDF5DD3B0FEA9BE13CA3C9`). Any mismatch
    stops the build.
 3. **Unpack.** `sysrescue-customize` taken from the same tag of
-   `systemrescue-sources`, `--unpack` into a work directory.
-4. **Overlay.** Copy `rootfs/` over the unpacked root filesystem.
-5. **Customize.** Bind-mount `/proc`, `/sys`, `/dev`, resolv.conf; run
-   `chroot.sh` inside the root; unmount (in a trap, so a failure does not
-   leave mounts behind).
-6. **Rebuild.** Add `sysrescue.d/*.yaml` to the ISO tree, `--rebuild` into
-   `out/rescue-usb-<ver>-<yyyy-mm-dd>.iso`.
+   `systemrescue-sources`, `--unpack` into a work directory. That extracts
+   only the ISO tree (`filesystem/`) plus its boot metadata; the root
+   filesystem stays packed in `filesystem/sysresccd/x86_64/airootfs.sfs`,
+   so `unsquashfs` it into `rootfs/` of the work directory.
+4. **Overlay.** Copy `rootfs/` of this repository over the unpacked root,
+   and clone the toolbox commit being built into `/root/toolbox`
+   (`git clone` of the local checkout's `HEAD`, then `origin` set to
+   `https://github.com/pashokitsme/toolbox`) — so a local build sees
+   committed but unpushed changes, and CI builds exactly the commit it runs on.
+5. **Customize.** `arch-chroot` into the root (it mounts `/proc`, `/sys`,
+   `/dev` and resolv.conf and unmounts them on exit) and run `chroot.sh`.
+6. **Repack.** `mksquashfs` the root back into `airootfs.sfs` with
+   SystemRescue's own settings (`-comp xz -Xbcj x86 -b 512k -Xdict-size 512k`;
+   `FAST=1` switches to `zstd -Xcompression-level 5` for local iterations),
+   and rewrite `airootfs.sha512` next to it — the `checksum` boot option
+   verifies against it.
+7. **Rebuild.** Add `sysrescue.d/*.yaml` to the ISO tree, `--rebuild` into
+   `out/rescue-usb-<ver>-<yyyy-mm-dd>.iso`. The volume label
+   (`RESCUE1302` for 13.02) comes from the original ISO's metadata, which the
+   boot entries rely on.
 
 `build.sh` is the same script locally and in CI. It needs root inside the
 container (chroot, bind mounts), so the container runs `--privileged`.
 
 ## Inside the image (`chroot.sh`)
 
-1. `pacman -Sy` with SystemRescue's snapshot configuration (keyring problems
+1. Assert `/etc/pacman.conf` still points at the archive snapshot (stop the
+   build otherwise — a SystemRescue layout change must not silently turn this
+   into a rolling install). SystemRescue ships its pacman keyring already
+   initialized; it is used as is. `pacman -Sy` with SystemRescue's snapshot configuration (keyring problems
    are handled with SystemRescue's own `pacman-faketime`), then
    `pacman -S --needed` everything in `packages.txt`.
 2. `systemctl enable tailscaled`.
 3. Claude Code through its native installer, with `HOME=/root`.
-4. `git clone https://github.com/pashokitsme/toolbox /root/toolbox`, then
+4. In the toolbox clone `build.sh` placed at `/root/toolbox`, run
    `./install.sh` with `HOME=/root` (links `bin/`, `config/`, `skills/`,
    runs `bun install` in `lib/`, installs `adoc`).
 5. `pacman -Scc` — drop the package cache, keep `/var/lib/pacman/sync`.
