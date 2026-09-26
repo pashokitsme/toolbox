@@ -16,6 +16,7 @@
 #       --no-config      Leave the config directory alone
 #       --skills-dir DIR Link skills into DIR instead of ~/.claude/skills
 #       --no-skills      Leave the skills directory alone
+#       --no-adoc        Skip installing adoc and its agent skill
 #   -h, --help           Show this help and exit
 #
 # Links are relative to nothing — they point at this checkout, so editing a
@@ -33,9 +34,10 @@ FORCE=0
 UNINSTALL=0
 WITH_CONFIG=1
 WITH_SKILLS=1
+WITH_ADOC=1
 
 usage() {
-	sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+	sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -45,6 +47,7 @@ while [ $# -gt 0 ]; do
 	--uninstall) UNINSTALL=1 ;;
 	--no-config) WITH_CONFIG=0 ;;
 	--no-skills) WITH_SKILLS=0 ;;
+	--no-adoc) WITH_ADOC=0 ;;
 	--prefix)
 		PREFIX="${2:?--prefix needs a directory}"
 		shift
@@ -211,17 +214,22 @@ fi
 # adoc is not part of this checkout: it is its own tool, installed from its
 # repository. bun links the binary; the agent skill comes from the same repo
 # through gh. Both are skipped when their command is missing — the checkups
-# below then say so.
-if command -v adoc >/dev/null 2>&1; then
+# below then say so — and a failed install is a warning, not the end of the
+# run: gh may simply not be logged in yet.
+if [ "$WITH_ADOC" = 0 ]; then
+	:
+elif command -v adoc >/dev/null 2>&1; then
 	say "  ok       adoc (already installed)"
 elif command -v bun >/dev/null 2>&1; then
 	say "installing adoc with bun"
-	run bun install -g github:pashokitsme/adoc
+	run bun install -g github:pashokitsme/adoc ||
+		say "  warn     adoc did not install — run ./install.sh again later"
 fi
 
-if [ "$WITH_SKILLS" = 1 ] && [ ! -e "$SKILLS_DIR/adoc" ] && command -v gh >/dev/null 2>&1; then
+if [ "$WITH_ADOC" = 1 ] && [ "$WITH_SKILLS" = 1 ] && [ ! -e "$SKILLS_DIR/adoc" ] && command -v gh >/dev/null 2>&1; then
 	say "installing the adoc skill with gh"
-	run gh skill install pashokitsme/adoc adoc --agent claude-code --scope user --force
+	run gh skill install pashokitsme/adoc adoc --agent claude-code --scope user --force ||
+		say "  warn     the adoc skill did not install — is gh logged in? (gh auth status)"
 fi
 
 # ------------------------------------------------------------------- checkups
