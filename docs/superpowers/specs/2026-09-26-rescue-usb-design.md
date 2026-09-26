@@ -17,7 +17,8 @@ login. No secrets in the image — it is built in the public toolbox repository.
 | User | root, like SystemRescue itself: autologin, X started by `dostartx`, no display manager. Dotfiles and toolbox live in `/root`. |
 | Terminal | ghostty by default in XFCE, xfce4-terminal as the fallback. |
 | Tailscale | `tailscaled` enabled, no auth key; `tailscale up` by hand. Incoming traffic on `tailscale0` allowed in SystemRescue's firewall at build time. |
-| Claude Code | Native installer into `/root/.local/bin` (it is not in the Arch repositories). Login by hand. |
+| Claude Code | Native installer into `/root/.local/bin` (it is not in the Arch repositories). Login by hand. `IS_SANDBOX=1` is set for root, so the `claude --dangerously-skip-permissions` alias from my zshrc works (Claude Code refuses that flag as root otherwise). |
+| Shell | My zshrc works in the image: its portable half moves into toolbox as `config/zsh/zshrc`, and `/root/.zshrc` only sources it. Secrets and macOS-only setup stay in `~/.zshrc` on the Mac and never enter the repository or the image. |
 | Toolbox | Cloned into `/root/toolbox` at build time, `install.sh` run as root. macOS-only tools (`tauri-win`, `prl-win-run`, `mcz`'s file dialog) end up on `PATH` and simply go unused. |
 | Version | Latest SystemRescue tag by default, resolved at build time; overridable. The signing key is the one thing pinned in the repository. |
 | Where | `iso/rescue-usb/` in toolbox. |
@@ -82,6 +83,8 @@ container (chroot, bind mounts), so the container runs `--privileged`.
 - **Disk:** fio, gdu.
 - **Everyday:** ghostty, helix, zellij, starship, btop, fzf, ripgrep, fd, bat,
   eza, git-delta, github-cli, glab, bun, jq, ttf-jetbrains-mono-nerd.
+- **For my zshrc:** zsh-syntax-highlighting, zsh-autosuggestions, zoxide,
+  lazygit, ffmpeg, imagemagick.
 
 All of them are in `extra`, and all were present in the archive snapshot of
 2026-07-28 that SystemRescue 13.02 is built on.
@@ -90,8 +93,10 @@ All of them are in `extra`, and all were present in the archive snapshot of
 
 - Firewall rule accepting input on `tailscale0` (in whichever mechanism
   SystemRescue's firewall uses — iptables or nftables — checked when writing it).
-- `/root/.zshrc.local` (read by grml-zsh-config): starship init,
-  `EDITOR=hx`, `~/.local/bin` on `PATH`.
+- `/root/.zshrc`: `source ~/.config/zsh/zshrc` and nothing else.
+- `IS_SANDBOX=1` in root's environment (`/etc/profile.d/` or the zshrc
+  loaded before it — whichever reaches both the terminal and XFCE-launched
+  programs).
 - XFCE default terminal: a custom exo helper for ghostty, xfce4-terminal left
   installed as the fallback.
 - The smoke check (see Testing), plus a unit that runs it only when the kernel
@@ -106,6 +111,21 @@ All of them are in `extra`, and all were present in the archive snapshot of
 - `install.sh`: `gh skill install` of the adoc skill must not abort the run.
   Under `set -e` a `gh` that is installed but not logged in currently kills
   `install.sh` on any machine; it becomes a warning, like a missing `bun`.
+- `config/zsh/zshrc` (new, linked to `~/.config/zsh` by `install.sh` like any
+  other config): the portable half of my current `~/.zshrc` — aliases (`ls`,
+  `cat`, `grep`, `cd`, `lg`, `npm`, `claude`, `clear`, `cls`, `rmf`),
+  completion setup, key bindings, zsh-syntax-highlighting and
+  zsh-autosuggestions, starship, zoxide, bun completion, `EDITOR=hx`,
+  `ccp --shell-init`, `LANG`/`LC_ALL`, `~/.local/bin` and `~/.bun/bin` on
+  `PATH`, and the functions `reload`, `ffmpeg-compress`, `magick-compress`,
+  `rustfmt-init`. Plugin paths and anything else platform-bound are picked by
+  platform (`/opt/homebrew/share/...` on macOS, `/usr/share/zsh/plugins/...`
+  on Arch); a missing tool is skipped, never an error at shell start.
+- `~/.zshrc` on the Mac (not in the repository): keeps brew, llvm, emsdk,
+  solana, dotnet, `HELIX_RUNTIME`, `kill-audio`, every exported token and the
+  work variables, and gains `source ~/.config/zsh/zshrc`. Backed up to
+  `~/.zshrc.bak` before the edit; a fresh shell on the Mac must behave as
+  before.
 - `config/ghostty/config`: a second `font-family` (JetBrains Mono Nerd Font)
   after `menlo`, so ghostty on Linux has a font it actually finds.
 - `README.md`: one row for `iso/rescue-usb`.
@@ -115,7 +135,9 @@ All of them are in `extra`, and all were present in the archive snapshot of
 **Smoke check** (baked into the image, runs on `rescue_usb_smoke=1`):
 `command -v` for every tool added, `systemctl is-active tailscaled`, the
 `tailscale0` firewall rule present, `pacman -Si ghostty` succeeding without a
-`-Sy`, `/root/toolbox` and `claude` present. Writes `SMOKE OK` or the failures
+`-Sy`, `/root/toolbox` and `claude` present, `zsh -i -c exit` printing
+nothing on stderr, and the zshrc aliases resolving (`z`, `eza`, `bat`, `rg`,
+`lazygit`, `ccp`). Writes `SMOKE OK` or the failures
 to the serial console and powers off.
 
 **Locally first, on this Mac (arm64):**
@@ -148,4 +170,6 @@ enrolling Ventoy's key; persistence with a `vtoycow` file; `tailscale up`;
   committed after checking it on the SystemRescue site.
 - SystemRescue through Ventoy with Secure Boot had an open `shim_lock` issue in
   2022; unverified for 13.x.
-- The image is ~1.8–2 GB (SystemRescue itself is 1.3 GB).
+- `ccp` is written for macOS (Claude Desktop state under `~/Library`); only
+  `ccp --shell-init` has to work on Linux, and the smoke check covers it.
+- The image is ~2 GB (SystemRescue itself is 1.3 GB).
