@@ -20,6 +20,7 @@ one-liner stopped being true.
 | `lib/<tool>/` | Multi-file tools with their own dependencies (`package.json`, lockfile, config). |
 | `config/<app>` | Application configs, one entry per `~/.config` name — a whole directory (`config/helix`) or a single file (`config/starship.toml`). |
 | `skills/<name>/` | Claude skills, one directory per skill with a `SKILL.md`. Linked into `~/.claude/skills`, so they apply in every project, not just this one. |
+| `iso/<image>/` | Bootable images built from this checkout. Not linked anywhere by `install.sh`; each has its own build script and workflow. |
 | `install.sh` | Links `bin/*` into `$PREFIX/bin` (default `~/.local`), `config/*` into `$XDG_CONFIG_HOME` (default `~/.config`) and `skills/*` into `~/.claude/skills`, installs `lib/` dependencies, reports missing external commands. |
 
 Adding a tool: drop a single executable file in `bin/`, or put the package in
@@ -79,7 +80,8 @@ group, because an interactive zsh ignores SIGTERM: stopping signals the group.
 `adoc` is **not in this checkout at all** — it is [its own
 tool](https://github.com/pashokitsme/adoc), and `install.sh` installs it with
 `bun install -g github:pashokitsme/adoc`, plus its agent skill through `gh skill
-install`. Nothing here links to it, so changing that tool means working in its
+install` — either failing is a warning, and `--no-adoc` skips both (the rescue
+image does). Nothing here links to it, so changing that tool means working in its
 own repository. Note that re-running `bun install -g` does not pick up a new
 commit — it keeps the cached git ref even with `--force`; updating is
 `bun remove -g adoc` followed by a fresh install.
@@ -90,3 +92,20 @@ commit — it keeps the cached git ref even with `--force`; updating is
 `bin/tauri-win` and `bin/prl-win-run` only work together: the first cross-builds
 and launches, the second is the cargo runner wired into `~/.cargo/config.toml`.
 Touching one usually means checking the other.
+
+`iso/rescue-usb` builds on SystemRescue instead of from scratch: `build.sh`
+verifies the SystemRescue ISO against the committed signing key, unsquashes its
+root, chroots in with `chroot.sh`, and repacks. Everything comes from
+SystemRescue's archive snapshot, never rolling Arch. `chroot.sh` checks each
+SystemRescue file before editing it, so a new release that moved something stops
+the build — fix the check, don't loosen it. The image clones the toolbox commit
+being built, so commit before `docker-build.sh`. The smoke check lives in the
+image (`rootfs/usr/local/lib/rescue-usb/smoke`) and runs on
+`rescue_usb_smoke=1`; `qemu.sh --smoke` is how both the Mac and CI run it.
+Under Rosetta pacman runs with `--disable-sandbox` (no seccomp there), and
+anything handed into the chroot goes through `/var/tmp`, since `arch-chroot`
+mounts its own `/tmp`. SystemRescue's quirks the image works around: its
+`mesa-minimal` has no OpenGL drivers (ghostty needs the real `mesa`), its global
+zshrc is grml's, whose prompt `config/zsh/zshrc` switches off for starship, Arch
+names helix `helix` (the image links `hx`), and Arch's bun needs AVX2 (the image
+takes bun's baseline build). `install.sh` skips `lib/raycast` off macOS.

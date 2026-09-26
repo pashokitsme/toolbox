@@ -191,3 +191,23 @@ enrolling Ventoy's key; persistence with a `vtoycow` file; `tailscale up`;
 - `ccp` is written for macOS (Claude Desktop state under `~/Library`); only
   `ccp --shell-init` has to work on Linux, and the smoke check covers it.
 - The image is ~2 GB (SystemRescue itself is 1.3 GB).
+
+## Found while building (2026-09-26)
+
+- SystemRescue's `mesa-minimal` carries no OpenGL drivers, so ghostty could not
+  draw on any machine; the image replaces it with Arch's `mesa`.
+- Arch's `bun` needs AVX2 (SIGILL under Rosetta and on older CPUs); the image
+  installs bun's `bun-linux-x64-baseline` release instead, checked against its
+  `SHASUMS256.txt`.
+- Arch names the helix binary `helix`; the image links `/usr/local/bin/hx`.
+- SystemRescue's global zshrc is grml's, which redraws its prompt before every
+  command; `config/zsh/zshrc` turns grml's prompt off when starship is present.
+- `theme = wombat` only resolved on the Mac through the case-insensitive disk,
+  to Ghostty's bundled theme; the config now names `wombat.conf` from the repo.
+- pacman: Russian mirrors lead the rolling mirrorlist; no Russian mirror carries
+  the Arch Linux Archive, so the snapshot list gains `mirror.surf` as a fallback.
+  The snapshot guard checks for dated `/repos/YYYY/MM/DD/` paths, since
+  SystemRescue itself lists two archive hosts.
+- adoc is not installed in the image (`install.sh --no-adoc`), and `install.sh`
+  skips `lib/raycast` off macOS.
+- Under Rosetta, pacman runs with `--disable-sandbox` (no seccomp there).
