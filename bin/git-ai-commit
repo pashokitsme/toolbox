@@ -119,7 +119,12 @@ EOF
 
 # --- generate ------------------------------------------------------------
 echo "→ generating commit message with model '${MODEL}'..." >&2
-MSG="$(claude -p "$PROMPT" --model "$MODEL")"
+# claude reports its own failures (an expired login, an unknown model) on stdout,
+# which the substitution would swallow — leaving only the ERR trap's exit code.
+if ! MSG="$(claude -p "$PROMPT" --model "$MODEL")"; then
+  printf 'error: claude -p failed:\n%s\n' "$MSG" >&2
+  exit 1
+fi
 
 # Strip accidental code fences / surrounding whitespace.
 MSG="$(printf '%s\n' "$MSG" | sed -E '/^```/d')"
