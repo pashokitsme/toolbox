@@ -1,0 +1,13 @@
+{
+	"name": "gxurl",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Turn a Gramax link into its enterprise form or into the article's path in the repository",
+	"bin": {
+		"gxurl": "./main.ts"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	}
+}
