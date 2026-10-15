@@ -13,18 +13,19 @@ export type Choice = {
 };
 
 export const KEYS = `keys in the picker
-  j k  up down   move                e  p   take that mode right away
+  j k  up down   move                e r p  take that mode right away
   enter          take the marked mode
   q  esc         quit with nothing, exit status 130; ctrl-c too
 
-The letters follow the physical key: with a Cyrillic layout on, у is e, з is p,
-о is j, л is k, й is q.`;
+The letters follow the physical key: with a Cyrillic layout on, у is e, к is r,
+з is p, о is j, л is k, й is q.`;
 
-/** Resolves with the index taken, or null when the user quit. */
-export function choose(title: string, choices: Choice[]): Promise<number | null> {
+/** Resolves with the index taken, or null when the user quit. The cursor
+ *  starts on `start`, or on the first choice that is possible. */
+export function choose(title: string, choices: Choice[], start = -1): Promise<number | null> {
 	const out = process.stderr;
 	const input = process.stdin;
-	let cursor = Math.max(0, choices.findIndex((c) => !c.error));
+	let cursor = start >= 0 && start < choices.length ? start : Math.max(0, choices.findIndex((c) => !c.error));
 	let message = "";
 	let drawn = 0;
 
@@ -42,7 +43,7 @@ export function choose(title: string, choices: Choice[]): Promise<number | null>
 		rows.push(
 			message
 				? `${C.yellow}${cut(printable(message), cols - 1)}${C.reset}`
-				: `${C.gray}${cut("j k move  enter take  e p take that one  q quit", cols - 1)}${C.reset}`,
+				: `${C.gray}${cut("j k move  enter take  e r p take that one  q quit", cols - 1)}${C.reset}`,
 		);
 		return rows;
 	};

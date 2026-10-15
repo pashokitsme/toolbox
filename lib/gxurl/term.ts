@@ -60,6 +60,7 @@ export type Key = {
 const US_POSITION: Record<string, string> = {
 	й: "q",
 	у: "e",
+	к: "r",
 	з: "p",
 	о: "j",
 	л: "k",

@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
-// gxurl — a Gramax link in, its enterprise form or the article's path out.
+// gxurl — a Gramax link in, its enterprise or regular form or the article's
+// path out.
 //
 //   gxurl -e <link>    https://app.gram.ax/<storage>/… → $GXURL_ENTERPRISE_URL/…
+//   gxurl -r <link>    $GXURL_ENTERPRISE_URL/… → https://app.gram.ax/$GXURL_STORAGE/…
 //   gxurl -p <link>    the article's path inside the catalog
 //   gxurl <link>       ask which, in a small picker
 //
@@ -9,25 +11,30 @@
 
 import { type Choice, choose, KEYS } from "./picker.ts";
 import { C, colorful, paint, printable } from "./term.ts";
-import { convert, LinkError, type Mode } from "./url.ts";
+import { convert, DEFAULT_APP, type Env, LinkError, type Mode, sameLink } from "./url.ts";
 
-const USAGE = `gxurl — turn a Gramax link into its enterprise form or into a path
+const USAGE = `gxurl — turn a Gramax link into its enterprise or regular form, or a path
 
-usage: gxurl [-e | -p] [link...]
+usage: gxurl [-e | -r | -p] [link...]
 
   https://app.gram.ax/gitlab.example.com/docs/handbook/master/-/guides/install
   -e  https://app-acme.gram.ax/docs/handbook/master/-/guides/install
   -p  guides/install
 
-Without -e or -p a picker asks which, showing what each makes of the first
-link. Without links they are read from stdin when it is not a terminal, and
-from the clipboard when it is or when stdin is empty. Each result goes to
-stdout on its own line and onto the clipboard; a terminal sees a ✓ before
-each one that was copied. When there is nothing to copy with, or copying
-fails, that is a warning and the results still print.
+  https://app-acme.gram.ax/docs/handbook/master/-/guides/install
+  -r  https://app.gram.ax/gitlab.example.com/docs/handbook/master/-/guides/install
+
+Without -e, -r or -p a picker asks which, showing what each makes of the
+first link, with the cursor on the first one that changes it. Without links
+they are read from stdin when it is not a terminal, and from the clipboard
+when it is or when stdin is empty. Each result goes to stdout on its own line
+and onto the clipboard; a terminal sees a ✓ before each one that was copied.
+When there is nothing to copy with, or copying fails, that is a warning and
+the results still print.
 
 options
   -e, --enterprise   the same page in the enterprise app at $GXURL_ENTERPRISE_URL
+  -r, --regular      the same page in the regular app, https://app.gram.ax
   -p, --path         the article's path inside the catalog
   -h, --help         this text
 
@@ -35,9 +42,15 @@ enterprise
   The enterprise app knows a single storage, so its links have no storage
   segment: <storage>/<group>/<repo>/<branch>/<catalog>/… loses <storage>, the
   #heading and the query stay. A link that already is in that short form only
-  moves to the enterprise address. The storage is not checked against the one
-  the enterprise app serves — a link from another storage converts all the same
-  and does not open.
+  moves to the enterprise address. With GXURL_STORAGE set, a link from another
+  storage is an error, since the enterprise app would not open it; without it
+  such a link converts all the same.
+
+regular
+  The other way: the enterprise app's short link gets its storage back from
+  GXURL_STORAGE, and moves to GXURL_APP_URL. A long link — from the regular app,
+  or the enterprise app's own long form — keeps its storage and only moves; one
+  with "-" in the storage slot gets GXURL_STORAGE as well.
 
 path
   What follows the catalog slot (the "-", or the catalog's name when it differs
@@ -51,6 +64,11 @@ path
 env
   GXURL_ENTERPRISE_URL   address of the enterprise app, such as
                          https://app-acme.gram.ax; needed for -e only
+  GXURL_STORAGE          the storage the enterprise app serves, such as
+                         gitlab.example.com; -r needs it for short links, -e
+                         checks links against it when it is set
+  GXURL_APP_URL          address of the regular app for -r;
+                         ${DEFAULT_APP} when unset
 
 clipboard
   pbcopy and pbpaste on macOS; elsewhere wl-copy and wl-paste under Wayland,
@@ -82,11 +100,12 @@ type Options = { mode?: Mode; links: string[] };
 function parseArgs(argv: string[]): Options {
 	const opts: Options = { links: [] };
 	const setMode = (mode: Mode) => {
-		if (opts.mode && opts.mode !== mode) usage("-e and -p do not go together");
+		if (opts.mode && opts.mode !== mode) usage("-e, -r and -p do not go together");
 		opts.mode = mode;
 	};
 	const LONG: Record<string, () => void> = {
 		"--enterprise": () => setMode("enterprise"),
+		"--regular": () => setMode("regular"),
 		"--path": () => setMode("path"),
 		"--help": () => {
 			process.stdout.write(USAGE);
@@ -95,6 +114,7 @@ function parseArgs(argv: string[]): Options {
 	};
 	const SHORT: Record<string, string> = {
 		e: "--enterprise",
+		r: "--regular",
 		p: "--path",
 		h: "--help",
 	};
@@ -164,10 +184,16 @@ function writeClipboard(text: string): string | null {
 
 const words = (text: string): string[] => text.split(/\s+/).filter(Boolean);
 
+const ENV: Env = {
+	enterprise: process.env.GXURL_ENTERPRISE_URL,
+	app: process.env.GXURL_APP_URL,
+	storage: process.env.GXURL_STORAGE,
+};
+
 /** One link's result, or the reason it has none. */
 function attempt(link: string, mode: Mode): { ok: string } | { error: string } {
 	try {
-		return { ok: convert(link, mode, process.env.GXURL_ENTERPRISE_URL) };
+		return { ok: convert(link, mode, ENV) };
 	} catch (e) {
 		if (e instanceof LinkError) return { error: e.message };
 		throw e;
@@ -176,9 +202,10 @@ function attempt(link: string, mode: Mode): { ok: string } | { error: string } {
 
 async function pickMode(first: string, more: number): Promise<Mode> {
 	if (!process.stdin.isTTY || !process.stderr.isTTY)
-		usage("choose -e or -p: the picker needs stdin and stderr on a terminal");
+		usage("choose -e, -r or -p: the picker needs stdin and stderr on a terminal");
 	const modes: [Mode, string][] = [
 		["enterprise", "e"],
+		["regular", "r"],
 		["path", "p"],
 	];
 	const choices: Choice[] = modes.map(([mode, key]) => {
@@ -188,7 +215,9 @@ async function pickMode(first: string, more: number): Promise<Mode> {
 			: { key, label: mode, preview: r.error.split("\n")[0] as string, error: true };
 	});
 	const title = more > 0 ? `${first}  (+${more} more)` : first;
-	const index = await choose(title, choices);
+	// an enterprise link would come back from -e as it is: start where it changes
+	const start = choices.findIndex((c) => !c.error && !sameLink(c.preview, first));
+	const index = await choose(title, choices, start);
 	if (index === null) process.exit(130);
 	return (modes[index] as [Mode, string])[0];
 }
