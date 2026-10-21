@@ -19,19 +19,17 @@ installed tool, config or skill changes with it.
 
 ## Tools
 
-| | |
-|---|---|
-| `glab-mrs` | Full-screen browser for GitLab merge requests and their pipelines: filter and read merge requests, watch job statuses, tail job logs, retry or cancel jobs and pipelines. Give it a link or a number to open that one merge request, `-y` to copy its link and be done. |
-| `glmr` | `glab-mrs` under a shorter name — the same tool, for `glmr 3614`. |
-| `adoc` | Car parts off autodoc.ru without a browser: search by part number or name, product card with rating and reviews, seller prices and delivery times, and your own basket, favorites and orders. Not linked from here — [its own tool](https://github.com/pashokitsme/adoc), which `install.sh` installs with `bun install -g`. |
-| `ccp` | Claude Code account profiles: several logins on this machine that share everything else — sessions, settings, skills, plugins — so moving between accounts is `ccp use <name>` instead of logging out and back in. Switches the command line and the Claude Desktop app together (the app restarts). Needs `eval "$(ccp --shell-init)"` in `~/.zshrc`, a one-time `ccp migrate <name>` with Claude quit, and one login per profile in each. |
-| `git-ai-commit` | Stages everything, writes the commit message with Claude from the staged diff, commits and pushes. |
-| `gxurl` | A Gramax link in, the same page in the enterprise app (`-e`) or back in the regular one (`-r`), or the article's path inside the catalog (`-p`) out; addresses and the storage come from `GXURL_*` variables; a small picker asks which when none is given. Takes the link as an argument, from stdin or from the clipboard, and puts the result on the clipboard. |
-| `mcz` | Shrinks photos and videos with ImageMagick and ffmpeg: pick them in a full-screen list or the macOS file dialog, or name them on the command line, and get `name.compressed.ext` beside each — EXIF dropped, color profile kept, and only when it came out smaller. Profiles `fast` and `small`, tuned in `mcz.toml`. |
-| `ofetch` | Renders a page in the obscura headless browser and saves it as markdown (or text, html, links, assets), printing the file path and a preview rather than the whole document — so an agent can grep out the part it needs. |
-| `cmdtab-reopen` | macOS: ⌘Tab to an app with no open windows opens one, the way a click on its Dock icon does, instead of showing the bare desktop. A launchd agent; `cmdtab-reopen install` once. |
-| `tauri-win` | Runs `tauri dev` for the Gramax desktop app cross-compiled to Windows, with the app itself running in a Parallels VM. |
-| `prl-win-run` | The cargo runner behind `tauri-win`: executes a Windows binary inside the Parallels VM. Not called by hand. |
+- **`glab-mrs`** — Full-screen browser for GitLab merge requests and their pipelines: filter and read merge requests, watch job statuses, tail job logs, retry or cancel jobs and pipelines. Give it a link or a number to open that one merge request, `-y` to copy its link and be done.
+- **`glmr`** — `glab-mrs` under a shorter name — the same tool, for `glmr 3614`.
+- **`adoc`** — Car parts off autodoc.ru without a browser: search by part number or name, product card with rating and reviews, seller prices and delivery times, and your own basket, favorites and orders. Not linked from here — [its own tool](https://github.com/pashokitsme/adoc), which `install.sh` installs with `bun install -g`.
+- **`ccp`** — Claude Code account profiles: several logins on this machine that share everything else — sessions, settings, skills, plugins — so moving between accounts is `ccp use <name>` instead of logging out and back in. Switches the command line and the Claude Desktop app together (the app restarts). Needs `eval "$(ccp --shell-init)"` in `~/.zshrc`, a one-time `ccp migrate <name>` with Claude quit, and one login per profile in each.
+- **`git-ai-commit`** — Stages everything, writes the commit message with Claude from the staged diff, commits and pushes.
+- **`gxurl`** — A Gramax link in, the same page in the enterprise app (`-e`) or back in the regular one (`-r`), or the article's path inside the catalog (`-p`) out; addresses and the storage come from `GXURL_*` variables; a small picker asks which when none is given. Takes the link as an argument, from stdin or from the clipboard, and puts the result on the clipboard.
+- **`mcz`** — Shrinks photos and videos with ImageMagick and ffmpeg: pick them in a full-screen list or the macOS file dialog, or name them on the command line, and get `name.compressed.ext` beside each — EXIF dropped, color profile kept, and only when it came out smaller. Profiles `fast` and `small`, tuned in `mcz.toml`.
+- **`ofetch`** — Renders a page in the obscura headless browser and saves it as markdown (or text, html, links, assets), printing the file path and a preview rather than the whole document — so an agent can grep out the part it needs.
+- **`cmdtab-reopen`** — macOS: ⌘Tab to an app with no open windows opens one, the way a click on its Dock icon does, instead of showing the bare desktop. A launchd agent; `cmdtab-reopen install` once.
+- **`tauri-win`** — Runs `tauri dev` for the Gramax desktop app cross-compiled to Windows, with the app itself running in a Parallels VM.
+- **`prl-win-run`** — The cargo runner behind `tauri-win`: executes a Windows binary inside the Parallels VM. Not called by hand.
 
 ## Configs
 
@@ -49,15 +47,11 @@ the rescue image.
 Every entry of `skills/` is linked into `~/.claude/skills` under the same name,
 so Claude picks it up in every project.
 
-| | |
-|---|---|
-| `obscura` | When to use the obscura headless browser and `ofetch` over `WebFetch`, `WebSearch` or Playwright, which of the 37 `browser_*` MCP tools to reach for and which of them are quietly broken, and the places obscura's own docs disagree with the shipped binary. |
+- **`obscura`** — When to use the obscura headless browser and `ofetch` over `WebFetch`, `WebSearch` or Playwright, which of the 37 `browser_*` MCP tools to reach for and which of them are quietly broken, and the places obscura's own docs disagree with the shipped binary.
 
 ## Images
 
-| | |
-|---|---|
-| `iso/rescue-usb` | SystemRescue for the Ventoy stick with my packages, this toolbox, tailscale and Claude Code baked in. A guide to its tools by situation sits on its desktop (`guide` in a terminal), and its Claude Code reads it too. `docker-build.sh` builds it on the Mac, `qemu.sh` boots it; the `rescue-usb` workflow (run by hand) builds and smoke-tests it and leaves the ISO as an artifact. |
+- **`iso/rescue-usb`** — SystemRescue for the Ventoy stick with my packages, this toolbox, tailscale and Claude Code baked in. A guide to its tools by situation sits on its desktop (`guide` in a terminal), and its Claude Code reads it too. `docker-build.sh` builds it on the Mac, `qemu.sh` boots it; the `rescue-usb` workflow (run by hand) builds and smoke-tests it and leaves the ISO as an artifact.
 
 ## Raycast
 
@@ -66,11 +60,9 @@ alone. A command that takes an argument can also be a fallback command (run
 Manage Fallback Commands in Raycast), which hands it whatever is typed in the
 root search:
 
-| | |
-|---|---|
-| `GitLab: Show MRs` | Merge requests of a project: projects in the order you last opened them, filters by people, state, draft and pipeline, details in a side panel, ⌘C for a titled link. A merge request link pasted into its search turns into that merge request. |
-| `GitLab: MR Name` | A merge request link in, the same link titled with the merge request's name out, on the clipboard. Takes the link as its argument or, once it is a fallback command, straight from the root search; without one it opens a prompt filled in from the clipboard. |
-| `Shell` | A zsh command line: runs a command from `~` with your `~/.zshrc` and shows what it prints. Without a command it opens a prompt as wide as the search bar, over the commands run before. Give it the alias `!` in Raycast's settings. |
+- **`GitLab: Show MRs`** — Merge requests of a project: projects in the order you last opened them, filters by people, state, draft and pipeline, details in a side panel, ⌘C for a titled link. A merge request link pasted into its search turns into that merge request.
+- **`GitLab: MR Name`** — A merge request link in, the same link titled with the merge request's name out, on the clipboard. Takes the link as its argument or, once it is a fallback command, straight from the root search; without one it opens a prompt filled in from the clipboard.
+- **`Shell`** — A zsh command line: runs a command from `~` with your `~/.zshrc` and shows what it prints. Without a command it opens a prompt as wide as the search bar, over the commands run before. Give it the alias `!` in Raycast's settings.
 
 GitLab hosts and tokens come from glab's own config, so a host shows up once
 `glab auth login --hostname <host>` has saved a token for it (a token kept in
