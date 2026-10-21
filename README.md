@@ -29,6 +29,7 @@ installed tool, config or skill changes with it.
 | `gxurl` | A Gramax link in, the same page in the enterprise app (`-e`) or back in the regular one (`-r`), or the article's path inside the catalog (`-p`) out; addresses and the storage come from `GXURL_*` variables; a small picker asks which when none is given. Takes the link as an argument, from stdin or from the clipboard, and puts the result on the clipboard. |
 | `mcz` | Shrinks photos and videos with ImageMagick and ffmpeg: pick them in a full-screen list or the macOS file dialog, or name them on the command line, and get `name.compressed.ext` beside each — EXIF dropped, color profile kept, and only when it came out smaller. Profiles `fast` and `small`, tuned in `mcz.toml`. |
 | `ofetch` | Renders a page in the obscura headless browser and saves it as markdown (or text, html, links, assets), printing the file path and a preview rather than the whole document — so an agent can grep out the part it needs. |
+| `cmdtab-reopen` | macOS: ⌘Tab to an app with no open windows opens one, the way a click on its Dock icon does, instead of showing the bare desktop. A launchd agent; `cmdtab-reopen install` once. |
 | `tauri-win` | Runs `tauri dev` for the Gramax desktop app cross-compiled to Windows, with the app itself running in a Parallels VM. |
 | `prl-win-run` | The cargo runner behind `tauri-win`: executes a Windows binary inside the Parallels VM. Not called by hand. |
 

@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# cmdtab-reopen — make ⌘Tab open a window, like a click on the Dock icon does.
+#
+# On macOS ⌘Tab only activates an application. A click on its Dock icon also
+# sends it the "reopen" event, and that is what makes an app with no windows
+# open one. So switching with ⌘Tab to an app whose windows are all closed shows
+# the bare desktop. This tool runs a small daemon (launchd agent) that notices
+# an activation made by ⌘Tab and, when the app still shows no window ~0.8 s
+# later, sends it the same reopen event the Dock would.
+#
+# Usage:
+#   cmdtab-reopen install     build the daemon and start it now and at every login
+#   cmdtab-reopen uninstall   stop it and remove the agent and the binary
+#   cmdtab-reopen status      whether the agent runs, and the last log lines
+#   cmdtab-reopen log         follow the log
+#   cmdtab-reopen run         build and run in the foreground, logging every activation
+#   cmdtab-reopen -h|--help   show this help
+#
+# What counts as ⌘Tab: the last input before the activation is a modifier
+# release, newer than the last key press and the last click. Clicks (Dock,
+# windows, Mission Control) and launchers (Spotlight, Raycast) are left alone —
+# they send reopen themselves. Apps that are launching, have no Dock icon, or
+# show a normal window in the current Space after the Space switch are left
+# alone too. Minimized windows do not count as shown, so — as with the Dock —
+# ⌘Tab to an app with only minimized windows restores one.
+#
+# What reopen does is up to the app. Most open their main window; document apps
+# may show an Open panel; an app that ignores reopen (its Dock icon does nothing
+# either) stays as it was.
+#
+# Files:
+#   ~/.config/cmdtab-reopen/ignore   bundle ids to leave alone, one per line, # comments
+#   ~/.local/libexec/cmdtab-reopen   the built daemon (from main.swift beside this script)
+#   ~/Library/LaunchAgents/local.toolbox.cmdtab-reopen.plist
+#   ~/Library/Logs/cmdtab-reopen.log one line per reopen sent
+#
+# Needs swiftc (Xcode or the Command Line Tools). No privacy permissions: input
+# timing and the window list come from public APIs that do not need them.
+
+set -euo pipefail
+
+LABEL=local.toolbox.cmdtab-reopen
+SRC="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/main.swift"
+BIN="$HOME/.local/libexec/cmdtab-reopen"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/cmdtab-reopen.log"
+DOMAIN="gui/$(id -u)"
+
+usage() {
+	sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+die() {
+	echo "cmdtab-reopen: $*" >&2
+	exit 1
+}
+
+build() {
+	[ "$(uname -s)" = Darwin ] || die "macOS only"
+	command -v swiftc >/dev/null || die "swiftc not found — install the Xcode Command Line Tools"
+	if [ -x "$BIN" ] && [ "$BIN" -nt "$SRC" ]; then
+		return
+	fi
+	mkdir -p "$(dirname "$BIN")"
+	echo "building $BIN"
+	swiftc -O "$SRC" -o "$BIN.tmp"
+	mv "$BIN.tmp" "$BIN"
+}
+
+stop_agent() {
+	launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+}
+
+install_agent() {
+	build
+	mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+	cat >"$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$BIN</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>StandardErrorPath</key>
+	<string>$LOG</string>
+</dict>
+</plist>
+EOF
+	stop_agent
+	launchctl bootstrap "$DOMAIN" "$PLIST"
+	echo "running; log: $LOG"
+}
+
+uninstall_agent() {
+	stop_agent
+	rm -f "$PLIST" "$BIN"
+	echo "removed (the log stays at $LOG)"
+}
+
+status() {
+	if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+		launchctl print "$DOMAIN/$LABEL" | grep -E '^[[:space:]]*(state|pid|last exit code) =' | sed 's/^[[:space:]]*/  /'
+	else
+		echo "  not loaded (cmdtab-reopen install)"
+	fi
+	[ -f "$LOG" ] && tail -n 5 "$LOG"
+	return 0
+}
+
+case "${1:-}" in
+install) install_agent ;;
+uninstall) uninstall_agent ;;
+status) status ;;
+log) exec tail -n 20 -F "$LOG" ;;
+run)
+	build
+	exec "$BIN" --verbose
+	;;
+-h | --help) usage ;;
+"")
+	usage
+	exit 1
+	;;
+*) die "unknown command '$1' (see --help)" ;;
+esac
