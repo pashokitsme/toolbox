@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+#
+# gh-notif-prune — mark GitHub notifications about closed issues and pull
+# requests as done, so they leave the inbox. --help is the documentation.
+
+set -euo pipefail
+
+JOBS=8
+
+usage() {
+	cat <<'EOF'
+gh-notif-prune — mark GitHub notifications about closed issues and PRs as done
+
+usage: gh-notif-prune [--dry-run] [--repo owner/name] [--reason REASON]
+
+Reads every notification (/notifications?all=true), looks up the state of each
+one's subject — 8 lookups at a time — and marks every thread whose issue or
+pull request is closed as done (DELETE /notifications/threads/<id>), which is
+what the inbox's "Done" button does. Subjects without a state — CheckSuite,
+Release, Discussion and the like — are left alone.
+
+options
+  -n, --dry-run          list what would be marked done, change nothing
+  -r, --repo OWNER/NAME  only notifications from this repository
+      --reason REASON    only closed issues with this state_reason:
+                         completed, not_planned or duplicate (pull requests
+                         have no state_reason, so this leaves them out)
+  -h, --help             this text
+
+report
+  How many notifications there were, how many have each state/state_reason,
+  how many have no state or could not be looked up, how many were marked
+  done, and every thread that failed with its id and why.
+
+  A thread counts as done when DELETE answers 204 and the thread is no longer
+  among the unread notifications (/notifications without all=true). The
+  all=true listing keeps returning done threads, so it cannot tell — which
+  also means a second run marks the same closed threads done again; that is
+  harmless.
+
+exit status
+  0 when every DELETE succeeded (lookup failures are only reported), 1 when
+  at least one did not, 2 on a usage error or when the listing itself fails.
+
+Needs gh, logged in with the notifications scope (gh auth refresh -s notifications).
+EOF
+}
+
+die() { echo "gh-notif-prune: $*" >&2; exit 2; }
+
+dry_run=0 repo="" reason=""
+while (($#)); do
+	case $1 in
+	-n | --dry-run) dry_run=1 ;;
+	-r | --repo) (($# > 1)) || die "$1 needs owner/name"; repo=$2; shift ;;
+	--repo=*) repo=${1#*=} ;;
+	--reason) (($# > 1)) || die "$1 needs a value"; reason=$2; shift ;;
+	--reason=*) reason=${1#*=} ;;
+	-h | --help) usage; exit 0 ;;
+	*) die "unknown argument: $1 (see --help)" ;;
+	esac
+	shift
+done
+[[ -z $repo || $repo == */* ]] || die "--repo wants owner/name, got: $repo"
+case $reason in
+"" | completed | not_planned | duplicate) ;;
+*) die "--reason is completed, not_planned or duplicate, got: $reason" ;;
+esac
+command -v gh >/dev/null || die "gh is not installed"
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/gh-notif-prune.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+note() { [[ -t 2 ]] && echo "$*" >&2 || true; }
+
+# id, type, subject url, repository, title — one notification per line.
+note "fetching notifications…"
+gh api --paginate '/notifications?all=true&per_page=50' --jq '.[] | [
+	.id, .subject.type, (.subject.url // ""), .repository.full_name,
+	(.subject.title | gsub("[\t\r\n]"; " "))
+] | @tsv' >"$tmp/all.tsv" || die "could not list notifications"
+
+if [[ -n $repo ]]; then
+	awk -F'\t' -v r="$repo" 'tolower($4) == tolower(r)' "$tmp/all.tsv" >"$tmp/list.tsv"
+else
+	mv "$tmp/all.tsv" "$tmp/list.tsv"
+fi
+
+# state and state_reason per subject url, looked up $JOBS at a time. Each
+# worker prints its line with a single printf into an O_APPEND file, so lines
+# from different workers never interleave. A failed lookup has "!" for a state
+# and gh's error for a reason.
+awk -F'\t' '$3 != "" { print $3 }' "$tmp/list.tsv" | sort -u >"$tmp/urls"
+note "looking up $(wc -l <"$tmp/urls" | tr -d ' ') subjects…"
+: >"$tmp/states.tsv"
+xargs -P "$JOBS" -I{} bash -c '
+	err=$(mktemp)
+	if out=$(gh api "$1" --jq "[(.state // \"\"), (.state_reason // \"\")] | @tsv" 2>"$err" </dev/null); then
+		printf "%s\t%s\n" "$1" "$out"
+	else
+		printf "%s\t!\t%s\n" "$1" "$(grep -v "^$" "$err" | tail -1 | tr "\t" " ")"
+	fi
+	rm -f "$err"
+' _ {} <"$tmp/urls" >>"$tmp/states.tsv"
+
+# id, type, url, repo, title, state, state_reason — state is "" for subjects
+# without one and "!" for failed lookups.
+awk -F'\t' -v OFS='\t' '
+	FILENAME == ARGV[1] { st[$1] = $2; rs[$1] = $3; next }
+	{
+		s = ""; r = ""
+		if ($3 != "") { s = ($3 in st) ? st[$3] : "!"; r = rs[$3] }
+		print $1, $2, $3, $4, $5, s, r
+	}
+' "$tmp/states.tsv" "$tmp/list.tsv" >"$tmp/joined.tsv"
+
+awk -F'\t' -v want="$reason" '$6 == "closed" && (want == "" || $7 == want)' \
+	"$tmp/joined.tsv" >"$tmp/targets.tsv"
+
+total=$(wc -l <"$tmp/list.tsv" | tr -d ' ')
+ntargets=$(wc -l <"$tmp/targets.tsv" | tr -d ' ')
+
+echo "notifications: $total${repo:+ in $repo}"
+awk -F'\t' '
+	$6 == "!" { failed++; next }
+	$6 == "" { none++; types[$2]++; next }
+	{ by[$6 "/" ($7 == "" ? "-" : $7)]++ }
+	END {
+		for (k in by) printf "  %-22s %5d\n", k, by[k] | "sort"
+		close("sort")
+		if (none) {
+			line = ""
+			for (t in types) line = line (line ? ", " : "") t " " types[t]
+			printf "  %-22s %5d   %s\n", "no state", none, line
+		}
+		if (failed) printf "  %-22s %5d\n", "lookup failed", failed
+	}
+' "$tmp/joined.tsv"
+awk -F'\t' '$2 == "!" { printf "    %s  %s\n", $1, $3 }' "$tmp/states.tsv"
+
+echo "to mark done: $ntargets${reason:+ (state_reason $reason)}"
+if ((dry_run)); then
+	awk -F'\t' '{ printf "  %-12s %-30s %-11s %-18s %s\n", $1, $4, $2, $6 "/" ($7 == "" ? "-" : $7), $5 }' \
+		"$tmp/targets.tsv"
+	echo "dry run: nothing marked"
+	exit 0
+fi
+((ntargets)) || exit 0
+
+# One DELETE at a time: GitHub's secondary rate limits are strict about
+# concurrent writes. ok holds the ids that answered 204, errors id<TAB>why.
+note "marking $ntargets threads done…"
+: >"$tmp/ok" ; : >"$tmp/errors"
+while IFS=$'\t' read -r id _; do
+	resp=$(gh api -i -X DELETE "/notifications/threads/$id" 2>&1 </dev/null) || true
+	code=$(printf '%s\n' "$resp" | awk '/^HTTP\// { print $2; exit }')
+	if [[ $code == 204 ]]; then
+		echo "$id" >>"$tmp/ok"
+	else
+		printf '%s\tHTTP %s %s\n' "$id" "${code:-?}" \
+			"$(printf '%s\n' "$resp" | grep '^gh:' | tail -1 | tr '\t' ' ')" >>"$tmp/errors"
+	fi
+done <"$tmp/targets.tsv"
+
+# A 204 is not the whole story: a thread that is still unread was not marked.
+if [[ -s $tmp/ok ]]; then
+	if gh api --paginate '/notifications?per_page=50' --jq '.[].id' >"$tmp/unread" </dev/null; then
+		awk 'FILENAME == ARGV[1] { u[$1] = 1; next } ($1 in u) { print $1 "\tstill unread after 204" }' \
+			"$tmp/unread" "$tmp/ok" >>"$tmp/errors"
+		awk 'FILENAME == ARGV[1] { u[$1] = 1; next } !($1 in u)' "$tmp/unread" "$tmp/ok" >"$tmp/ok.checked"
+		mv "$tmp/ok.checked" "$tmp/ok"
+	else
+		echo "gh-notif-prune: could not list unread notifications to check the result" >&2
+	fi
+fi
+
+nerrors=$(wc -l <"$tmp/errors" | tr -d ' ')
+echo "marked done: $(wc -l <"$tmp/ok" | tr -d ' ')"
+echo "errors: $nerrors"
+awk -F'\t' '{ printf "  %s  %s\n", $1, $2 }' "$tmp/errors"
+((nerrors == 0))
