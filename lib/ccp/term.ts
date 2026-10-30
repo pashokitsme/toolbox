@@ -7,16 +7,24 @@
 const CSI = "\x1b[";
 const plain = process.env.NO_COLOR !== undefined || !process.stderr.isTTY;
 
-const wrap = (code: string) => (s: string) => (plain ? s : `${CSI}${code}m${s}${CSI}0m`);
+// Colors are the wombat theme's (config/ghostty) hex, which Bun.color turns into
+// whatever the terminal takes — truecolor or 256. Its squeeze into 16 colors is
+// poor (the yellow lands on red, the gray on black), so a 16-color terminal gets
+// the palette slot the hex came from.
+const DEPTH = Bun.color("#000", "ansi") ?? "";
+const color = (hex: string, sgr: number): string =>
+	DEPTH.includes("38;") ? (Bun.color(hex, "ansi") ?? "") : `${CSI}${sgr}m`;
+
+const wrap = (open: string) => (s: string) => (plain ? s : `${open}${s}${CSI}0m`);
 
 export const C = {
-	bold: wrap("1"),
-	dim: wrap("2"),
-	red: wrap("31"),
-	green: wrap("32"),
-	yellow: wrap("33"),
-	cyan: wrap("36"),
-	gray: wrap("90"),
+	bold: wrap(`${CSI}1m`),
+	dim: wrap(`${CSI}2m`),
+	red: wrap(color("#ff615a", 31)),
+	green: wrap(color("#b1e969", 32)),
+	yellow: wrap(color("#ebd99c", 33)),
+	cyan: wrap(color("#82fff7", 36)),
+	gray: wrap(color("#313131", 90)),
 };
 
 /** Human-facing output. Never stdout — the shell function evals that. */

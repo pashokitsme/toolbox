@@ -7,17 +7,25 @@ import { homedir } from "node:os";
 const ESC = "\x1b";
 export const CSI = `${ESC}[`;
 
+// Colors are the wombat theme's (config/ghostty) hex, which Bun.color turns into
+// whatever the terminal takes — truecolor or 256 — and into nothing under
+// NO_COLOR. Its squeeze into 16 colors is poor (the yellow lands on red, the gray
+// on black), so a 16-color terminal gets the palette slot the hex came from.
+const DEPTH = Bun.color("#000", "ansi") ?? "";
+const color = (hex: string, sgr: number): string =>
+	DEPTH === "" ? "" : DEPTH.includes("38;") ? (Bun.color(hex, "ansi") ?? "") : `${CSI}${sgr}m`;
+
 export const C = {
 	reset: `${CSI}0m`,
 	bold: `${CSI}1m`,
 	dim: `${CSI}2m`,
 	invert: `${CSI}7m`,
-	red: `${CSI}31m`,
-	green: `${CSI}32m`,
-	yellow: `${CSI}33m`,
-	blue: `${CSI}34m`,
-	cyan: `${CSI}36m`,
-	gray: `${CSI}90m`,
+	red: color("#ff615a", 31),
+	green: color("#b1e969", 32),
+	yellow: color("#ebd99c", 33),
+	blue: color("#5da9f6", 34),
+	cyan: color("#82fff7", 36),
+	gray: color("#313131", 90),
 };
 
 /** Colors only for a terminal, and never when NO_COLOR is set. */
